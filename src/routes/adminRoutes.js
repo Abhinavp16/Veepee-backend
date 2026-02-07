@@ -5,6 +5,17 @@ const validate = require('../middlewares/validate');
 const { uploadProductImages } = require('../config/cloudinary');
 
 const adminProductController = require('../controllers/admin/productController');
+
+// Middleware that conditionally applies multer only for multipart/form-data requests
+const optionalUpload = (multerMiddleware) => {
+  return (req, res, next) => {
+    const contentType = req.headers['content-type'] || '';
+    if (contentType.includes('multipart/form-data')) {
+      return multerMiddleware(req, res, next);
+    }
+    next();
+  };
+};
 const adminNegotiationController = require('../controllers/admin/negotiationController');
 const adminOrderController = require('../controllers/admin/orderController');
 const adminPaymentController = require('../controllers/admin/paymentController');
@@ -21,14 +32,14 @@ router.use(adminOnly);
 router.get('/products', adminProductController.getProducts);
 router.post(
   '/products',
-  uploadProductImages.array('images', 10),
+  optionalUpload(uploadProductImages.array('images', 10)),
   validate(adminValidation.createProduct),
   adminProductController.createProduct
 );
 router.get('/products/:id', adminProductController.getProductById);
 router.put(
   '/products/:id',
-  uploadProductImages.array('images', 10),
+  optionalUpload(uploadProductImages.array('images', 10)),
   validate(adminValidation.updateProduct),
   adminProductController.updateProduct
 );

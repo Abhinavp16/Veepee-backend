@@ -173,6 +173,12 @@ const adminValidation = {
     sku: Joi.string().required(),
     stock: Joi.number().integer().min(0).default(0),
     lowStockThreshold: Joi.number().integer().min(0).default(5),
+    images: Joi.array().items(Joi.object({
+      url: Joi.string().required(),
+      publicId: Joi.string().required(),
+      isPrimary: Joi.boolean().default(false),
+      order: Joi.number().default(0),
+    })),
     specifications: Joi.array().items(Joi.object({
       key: Joi.string().required(),
       value: Joi.string().required(),
@@ -181,6 +187,8 @@ const adminValidation = {
     isFeatured: Joi.boolean().default(false),
     isHot: Joi.boolean().default(false),
     company: Joi.string().allow('', null),
+    videoUrl: Joi.string().allow('', null),
+    shippingTerms: Joi.string().allow('', null),
   }),
 
   updateProduct: Joi.object({
@@ -198,6 +206,12 @@ const adminValidation = {
     negotiationEnabled: Joi.boolean(),
     stock: Joi.number().integer().min(0),
     lowStockThreshold: Joi.number().integer().min(0),
+    images: Joi.array().items(Joi.object({
+      url: Joi.string().required(),
+      publicId: Joi.string().required(),
+      isPrimary: Joi.boolean().default(false),
+      order: Joi.number().default(0),
+    })),
     specifications: Joi.array().items(Joi.object({
       key: Joi.string().required(),
       value: Joi.string().required(),
@@ -206,6 +220,8 @@ const adminValidation = {
     isFeatured: Joi.boolean(),
     isHot: Joi.boolean(),
     company: Joi.string().allow('', null),
+    videoUrl: Joi.string().allow('', null),
+    shippingTerms: Joi.string().allow('', null),
   }),
 
   updateStock: Joi.object({

@@ -87,11 +87,20 @@ exports.getProducts = async (req, res, next) => {
 exports.getProductBySlug = async (req, res, next) => {
   try {
     const userRole = req.user?.role || 'guest';
+    const param = req.params.slug;
     
-    const product = await Product.findOne({
-      slug: req.params.slug,
+    // Try finding by slug first, then by ID if it looks like a MongoDB ObjectId
+    let product = await Product.findOne({
+      slug: param,
       status: PRODUCT_STATUS.ACTIVE,
     }).lean();
+
+    if (!product && param.match(/^[0-9a-fA-F]{24}$/)) {
+      product = await Product.findOne({
+        _id: param,
+        status: PRODUCT_STATUS.ACTIVE,
+      }).lean();
+    }
 
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');

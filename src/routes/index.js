@@ -9,6 +9,9 @@ const orderRoutes = require('./orderRoutes');
 const paymentRoutes = require('./paymentRoutes');
 const adminRoutes = require('./adminRoutes');
 const companyRoutes = require('./companyRoutes');
+const categoryRoutes = require('./categoryRoutes');
+const uploadRoutes = require('./uploadRoutes');
+const notificationRoutes = require('./notificationRoutes');
 
 router.get('/', (req, res) => {
   res.json({
@@ -24,6 +27,9 @@ router.get('/', (req, res) => {
       payments: '/api/v1/payments',
       admin: '/api/v1/admin',
       companies: '/api/v1/companies',
+      categories: '/api/v1/categories',
+      upload: '/api/v1/upload',
+      notifications: '/api/v1/notifications',
     },
   });
 });
@@ -36,5 +42,8 @@ router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/admin', adminRoutes);
 router.use('/companies', companyRoutes);
+router.use('/categories', categoryRoutes);
+router.use('/upload', uploadRoutes);
+router.use('/notifications', notificationRoutes);
 
 module.exports = router;

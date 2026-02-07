@@ -98,6 +98,17 @@ const productSchema = new mongoose.Schema({
     value: { type: String, required: true },
   }],
 
+  videoUrl: {
+    type: String,
+    default: null,
+    trim: true,
+  },
+
+  shippingTerms: {
+    type: String,
+    default: 'Free shipping on orders above ₹5,000. Standard delivery within 5-7 business days. Express delivery available at additional cost.\n\nReturn Policy: Products can be returned within 7 days of delivery if unused and in original packaging. Damaged or defective items will be replaced free of charge. Refunds are processed within 5-7 business days after the returned item is received and inspected.',
+  },
+
   metaTitle: {
     type: String,
     maxlength: [70, 'Meta title cannot exceed 70 characters'],

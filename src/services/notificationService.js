@@ -1,5 +1,5 @@
 const { getMessaging } = require('../config/firebase');
-const { User } = require('../models');
+const { DeviceToken, Notification } = require('../models');
 
 class NotificationService {
   constructor() {
@@ -132,13 +132,27 @@ class NotificationService {
 
   async sendToUser(userId, notification, data = {}) {
     try {
-      const user = await User.findById(userId).select('fcmTokens');
-      if (!user || !user.fcmTokens || user.fcmTokens.length === 0) {
+      // Store notification in DB
+      try {
+        await Notification.create({
+          userId,
+          title: notification.title,
+          body: notification.body,
+          type: data.type || 'general',
+          data,
+        });
+      } catch (dbErr) {
+        console.error('Error storing notification:', dbErr);
+      }
+
+      const tokens = await DeviceToken.find({ userId, isActive: true }).select('fcmToken');
+      if (!tokens || tokens.length === 0) {
         console.log(`No FCM tokens found for user ${userId}`);
         return null;
       }
 
-      return await this.sendToMultipleDevices(user.fcmTokens, notification, data);
+      const fcmTokens = tokens.map(t => t.fcmToken);
+      return await this.sendToMultipleDevices(fcmTokens, notification, data);
     } catch (error) {
       console.error('Error sending notification to user:', error);
       throw error;
@@ -205,9 +219,9 @@ class NotificationService {
 
   async removeInvalidToken(token) {
     try {
-      await User.updateMany(
-        { fcmTokens: token },
-        { $pull: { fcmTokens: token } }
+      await DeviceToken.updateMany(
+        { fcmToken: token },
+        { $set: { isActive: false } }
       );
     } catch (error) {
       console.error('Error removing invalid token:', error);
@@ -216,9 +230,9 @@ class NotificationService {
 
   async removeInvalidTokens(tokens) {
     try {
-      await User.updateMany(
-        { fcmTokens: { $in: tokens } },
-        { $pull: { fcmTokens: { $in: tokens } } }
+      await DeviceToken.updateMany(
+        { fcmToken: { $in: tokens } },
+        { $set: { isActive: false } }
       );
     } catch (error) {
       console.error('Error removing invalid tokens:', error);
@@ -273,6 +287,28 @@ class NotificationService {
       imageUrl,
     }, {
       type: 'promotion',
+    });
+  }
+
+  async sendPaymentVerified(userId, orderId, orderNumber) {
+    return this.sendToUser(userId, {
+      title: 'Payment Verified!',
+      body: `Your payment for order ${orderNumber} has been verified. We're processing your order now.`,
+    }, {
+      type: 'payment_verified',
+      orderId: orderId.toString(),
+    });
+  }
+
+  async sendPaymentRejected(userId, orderId, orderNumber, reason) {
+    return this.sendToUser(userId, {
+      title: 'Payment Declined',
+      body: reason
+        ? `Your payment for order ${orderNumber} was declined: ${reason}`
+        : `Your payment for order ${orderNumber} was declined. Please re-upload.`,
+    }, {
+      type: 'payment_rejected',
+      orderId: orderId.toString(),
     });
   }
 }

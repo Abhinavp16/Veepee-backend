@@ -2,6 +2,7 @@ const { Negotiation, User } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { NEGOTIATION_STATUS, NEGOTIATION_ACTIONS } = require('../../utils/constants');
+const notificationService = require('../../services/notificationService');
 
 exports.getNegotiations = async (req, res, next) => {
   try {
@@ -101,7 +102,18 @@ exports.acceptNegotiation = async (req, res, next) => {
 
     await negotiation.save();
 
-    // TODO: Send notification to wholesaler
+    // Send push notification to user
+    try {
+      await notificationService.sendToUser(negotiation.wholesalerId, {
+        title: 'Negotiation Accepted! ✅',
+        body: `Your offer for ${negotiation.productSnapshot.name} has been accepted at ₹${negotiation.finalPricePerUnit}/unit.`,
+      }, {
+        type: 'negotiation_accepted',
+        negotiationId: negotiation._id.toString(),
+      });
+    } catch (notifErr) {
+      console.error('Failed to send negotiation accepted notification:', notifErr.message);
+    }
 
     res.json({
       success: true,
@@ -139,7 +151,20 @@ exports.rejectNegotiation = async (req, res, next) => {
     negotiation.status = NEGOTIATION_STATUS.REJECTED;
     await negotiation.save();
 
-    // TODO: Send notification to wholesaler
+    // Send push notification to user
+    try {
+      await notificationService.sendToUser(negotiation.wholesalerId, {
+        title: 'Negotiation Declined',
+        body: reason
+          ? `Your negotiation for ${negotiation.productSnapshot.name} was declined: ${reason}`
+          : `Your negotiation for ${negotiation.productSnapshot.name} was declined.`,
+      }, {
+        type: 'negotiation_rejected',
+        negotiationId: negotiation._id.toString(),
+      });
+    } catch (notifErr) {
+      console.error('Failed to send negotiation rejected notification:', notifErr.message);
+    }
 
     res.json({
       success: true,
@@ -180,7 +205,18 @@ exports.counterNegotiation = async (req, res, next) => {
 
     await negotiation.save();
 
-    // TODO: Send notification to wholesaler
+    // Send push notification to user
+    try {
+      await notificationService.sendToUser(negotiation.wholesalerId, {
+        title: 'New Counter Offer',
+        body: `Admin counter-offered ₹${pricePerUnit}/unit for ${negotiation.productSnapshot.name}. Review and respond.`,
+      }, {
+        type: 'negotiation_countered',
+        negotiationId: negotiation._id.toString(),
+      });
+    } catch (notifErr) {
+      console.error('Failed to send negotiation counter notification:', notifErr.message);
+    }
 
     res.json({
       success: true,

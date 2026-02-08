@@ -11,7 +11,7 @@ exports.getCart = async (req, res, next) => {
 
     const productIds = cart.items.map(item => item.productId);
     const products = await Product.find({ _id: { $in: productIds } })
-      .select('name slug price stock images')
+      .select('name slug retailPrice wholesalePrice stock images')
       .lean();
 
     const productMap = products.reduce((acc, p) => {
@@ -28,15 +28,15 @@ exports.getCart = async (req, res, next) => {
         product: {
           name: product.name,
           slug: product.slug,
-          price: product.price,
+          price: product.retailPrice,
           stock: product.stock,
           image: product.images?.find(img => img.isPrimary)?.url || product.images?.[0]?.url,
         },
         quantity: item.quantity,
         priceAtAdd: item.priceAtAdd,
-        currentPrice: product.price,
-        priceChanged: item.priceAtAdd !== product.price,
-        itemTotal: item.quantity * product.price,
+        currentPrice: product.retailPrice,
+        priceChanged: item.priceAtAdd !== product.retailPrice,
+        itemTotal: item.quantity * product.retailPrice,
       };
     }).filter(Boolean);
 
@@ -74,7 +74,7 @@ exports.addItem = async (req, res, next) => {
       cart = new Cart({ userId: req.user._id, items: [] });
     }
 
-    cart.addItem(productId, quantity, product.price);
+    cart.addItem(productId, quantity, product.retailPrice);
     await cart.save();
 
     res.json({

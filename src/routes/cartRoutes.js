@@ -6,7 +6,7 @@ const validate = require('../middlewares/validate');
 const { cartValidation } = require('../validations');
 
 router.use(protect);
-router.use(authorize('buyer', 'admin'));
+router.use(authorize('buyer', 'wholesaler', 'admin'));
 
 router.get('/', cartController.getCart);
 router.post('/items', validate(cartValidation.addItem), cartController.addItem);

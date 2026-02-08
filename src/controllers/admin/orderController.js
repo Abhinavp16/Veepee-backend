@@ -1,4 +1,4 @@
-const { Order, Payment } = require('../../models');
+const { Order, Payment, Product, StockLog } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { ORDER_STATUS } = require('../../utils/constants');
@@ -76,6 +76,8 @@ exports.updateOrderStatus = async (req, res, next) => {
     }
 
     const allowedTransitions = {
+      [ORDER_STATUS.PENDING_PAYMENT]: [ORDER_STATUS.CANCELLED],
+      [ORDER_STATUS.PAYMENT_UPLOADED]: [ORDER_STATUS.CANCELLED],
       [ORDER_STATUS.PAYMENT_VERIFIED]: [ORDER_STATUS.PROCESSING, ORDER_STATUS.CANCELLED],
       [ORDER_STATUS.PROCESSING]: [ORDER_STATUS.SHIPPED, ORDER_STATUS.CANCELLED],
       [ORDER_STATUS.SHIPPED]: [ORDER_STATUS.DELIVERED],
@@ -87,6 +89,74 @@ exports.updateOrderStatus = async (req, res, next) => {
         `Cannot transition from ${order.status} to ${status}`,
         'INVALID_STATUS_TRANSITION'
       );
+    }
+
+    // ── STOCK DEDUCTION on PROCESSING (owner confirms the order) ──
+    if (status === ORDER_STATUS.PROCESSING) {
+      for (const item of order.items) {
+        const product = await Product.findById(item.productId);
+        if (!product) {
+          throw new BadRequestError(
+            `Product ${item.productSnapshot.name} no longer exists`,
+            'PRODUCT_NOT_FOUND'
+          );
+        }
+        if (product.stock < item.quantity) {
+          throw new BadRequestError(
+            `Insufficient stock for ${product.name}. Available: ${product.stock}, Required: ${item.quantity}`,
+            'INSUFFICIENT_STOCK'
+          );
+        }
+
+        const previousStock = product.stock;
+        const result = await Product.findOneAndUpdate(
+          { _id: item.productId, stock: { $gte: item.quantity } },
+          { $inc: { stock: -item.quantity } },
+          { new: true }
+        );
+        if (!result) {
+          throw new BadRequestError(
+            `Race condition: stock changed for ${item.productSnapshot.name}. Please retry.`,
+            'STOCK_RACE_CONDITION'
+          );
+        }
+
+        await StockLog.create({
+          productId: item.productId,
+          action: 'order_deduct',
+          quantityChange: -item.quantity,
+          previousStock,
+          newStock: result.stock,
+          orderId: order._id,
+          reason: `Order ${order.orderNumber} confirmed`,
+          performedBy: req.user._id,
+        });
+      }
+    }
+
+    // ── STOCK RESTORATION on CANCEL (only if was already PROCESSING) ──
+    if (status === ORDER_STATUS.CANCELLED && order.status === ORDER_STATUS.PROCESSING) {
+      for (const item of order.items) {
+        const product = await Product.findById(item.productId);
+        if (product) {
+          const previousStock = product.stock;
+          await Product.findByIdAndUpdate(
+            item.productId,
+            { $inc: { stock: item.quantity } }
+          );
+
+          await StockLog.create({
+            productId: item.productId,
+            action: 'cancel_restore',
+            quantityChange: item.quantity,
+            previousStock,
+            newStock: previousStock + item.quantity,
+            orderId: order._id,
+            reason: `Order ${order.orderNumber} cancelled – stock restored`,
+            performedBy: req.user._id,
+          });
+        }
+      }
     }
 
     order.addStatusHistory(status, note, req.user._id);

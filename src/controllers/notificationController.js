@@ -1,10 +1,10 @@
 const notificationService = require('../services/notificationService');
-const { User } = require('../models');
+const { DeviceToken, Notification } = require('../models');
 
 exports.registerFcmToken = async (req, res, next) => {
   try {
-    const { fcmToken } = req.body;
-    const userId = req.user.id;
+    const { fcmToken, platform } = req.body;
+    const userId = req.user._id;
 
     if (!fcmToken) {
       return res.status(400).json({
@@ -13,11 +13,11 @@ exports.registerFcmToken = async (req, res, next) => {
       });
     }
 
-    // Add token to user's fcmTokens array (avoid duplicates)
-    await User.findByIdAndUpdate(
-      userId,
-      { $addToSet: { fcmTokens: fcmToken } },
-      { new: true }
+    // Upsert: create or reactivate the token
+    await DeviceToken.findOneAndUpdate(
+      { userId, fcmToken },
+      { $set: { isActive: true, platform: platform || 'android' } },
+      { upsert: true, new: true }
     );
 
     res.json({
@@ -32,7 +32,7 @@ exports.registerFcmToken = async (req, res, next) => {
 exports.unregisterFcmToken = async (req, res, next) => {
   try {
     const { fcmToken } = req.body;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     if (!fcmToken) {
       return res.status(400).json({
@@ -41,11 +41,10 @@ exports.unregisterFcmToken = async (req, res, next) => {
       });
     }
 
-    // Remove token from user's fcmTokens array
-    await User.findByIdAndUpdate(
-      userId,
-      { $pull: { fcmTokens: fcmToken } },
-      { new: true }
+    // Deactivate the token
+    await DeviceToken.findOneAndUpdate(
+      { userId, fcmToken },
+      { $set: { isActive: false } }
     );
 
     res.json({
@@ -60,7 +59,7 @@ exports.unregisterFcmToken = async (req, res, next) => {
 exports.subscribeToTopic = async (req, res, next) => {
   try {
     const { topic } = req.body;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     if (!topic) {
       return res.status(400).json({
@@ -69,15 +68,15 @@ exports.subscribeToTopic = async (req, res, next) => {
       });
     }
 
-    const user = await User.findById(userId).select('fcmTokens');
-    if (!user || !user.fcmTokens || user.fcmTokens.length === 0) {
+    const tokens = await DeviceToken.find({ userId, isActive: true }).select('fcmToken');
+    if (!tokens || tokens.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'No FCM tokens registered for this user',
       });
     }
 
-    await notificationService.subscribeToTopic(user.fcmTokens, topic);
+    await notificationService.subscribeToTopic(tokens.map(t => t.fcmToken), topic);
 
     res.json({
       success: true,
@@ -91,7 +90,7 @@ exports.subscribeToTopic = async (req, res, next) => {
 exports.unsubscribeFromTopic = async (req, res, next) => {
   try {
     const { topic } = req.body;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     if (!topic) {
       return res.status(400).json({
@@ -100,15 +99,15 @@ exports.unsubscribeFromTopic = async (req, res, next) => {
       });
     }
 
-    const user = await User.findById(userId).select('fcmTokens');
-    if (!user || !user.fcmTokens || user.fcmTokens.length === 0) {
+    const tokens = await DeviceToken.find({ userId, isActive: true }).select('fcmToken');
+    if (!tokens || tokens.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'No FCM tokens registered for this user',
       });
     }
 
-    await notificationService.unsubscribeFromTopic(user.fcmTokens, topic);
+    await notificationService.unsubscribeFromTopic(tokens.map(t => t.fcmToken), topic);
 
     res.json({
       success: true,
@@ -198,6 +197,58 @@ exports.sendPromotion = async (req, res, next) => {
       message: 'Promotional notification sent',
       data: result,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get user's notifications
+exports.getMyNotifications = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [notifications, total, unreadCount] = await Promise.all([
+      Notification.find({ userId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Notification.countDocuments({ userId }),
+      Notification.countDocuments({ userId, isRead: false }),
+    ]);
+
+    res.json({
+      success: true,
+      data: notifications,
+      unreadCount,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Mark notifications as read
+exports.markAsRead = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { ids } = req.body; // array of notification IDs, or empty to mark all
+
+    const filter = { userId };
+    if (ids && ids.length > 0) {
+      filter._id = { $in: ids };
+    }
+
+    await Notification.updateMany(filter, { $set: { isRead: true } });
+
+    res.json({ success: true, message: 'Notifications marked as read' });
   } catch (error) {
     next(error);
   }

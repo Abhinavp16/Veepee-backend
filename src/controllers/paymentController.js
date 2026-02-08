@@ -1,6 +1,8 @@
 const { Payment, Order, Settings } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../utils/constants');
+const { getStorage } = require('../config/firebase');
+const { v4: uuidv4 } = require('uuid');
 
 exports.getUpiDetails = async (req, res, next) => {
   try {
@@ -48,8 +50,37 @@ exports.uploadScreenshot = async (req, res, next) => {
       throw new BadRequestError('Screenshot is required', 'SCREENSHOT_REQUIRED');
     }
 
-    payment.screenshotUrl = req.file.path;
-    payment.screenshotPublicId = req.file.filename;
+    // Upload to Firebase Storage under payments/ folder
+    const bucket = getStorage();
+    if (!bucket) {
+      throw new BadRequestError('Storage not configured', 'STORAGE_NOT_CONFIGURED');
+    }
+
+    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const filename = `payments/${orderId}_${uuidv4()}.${ext}`;
+    const fileUpload = bucket.file(filename);
+
+    await new Promise((resolve, reject) => {
+      const stream = fileUpload.createWriteStream({
+        metadata: {
+          contentType: req.file.mimetype,
+          metadata: {
+            orderId,
+            uploadedBy: req.user._id.toString(),
+            uploadedAt: new Date().toISOString(),
+          },
+        },
+      });
+      stream.on('error', reject);
+      stream.on('finish', resolve);
+      stream.end(req.file.buffer);
+    });
+
+    await fileUpload.makePublic();
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`;
+
+    payment.screenshotUrl = publicUrl;
+    payment.screenshotPublicId = filename;
     payment.uploadedAt = new Date();
     payment.status = PAYMENT_STATUS.PENDING;
     await payment.save();

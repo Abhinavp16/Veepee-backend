@@ -11,6 +11,10 @@ router.post('/unregister-token', protect, notificationController.unregisterFcmTo
 router.post('/subscribe', protect, notificationController.subscribeToTopic);
 router.post('/unsubscribe', protect, notificationController.unsubscribeFromTopic);
 
+// User routes - get & manage notifications
+router.get('/my', protect, notificationController.getMyNotifications);
+router.post('/mark-read', protect, notificationController.markAsRead);
+
 // Admin routes - send notifications
 router.post('/send-to-user', protect, authorize('admin'), notificationController.sendToUser);
 router.post('/send-to-topic', protect, authorize('admin'), notificationController.sendToTopic);

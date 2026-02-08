@@ -202,19 +202,36 @@ exports.getFeaturedProducts = async (req, res, next) => {
 
 exports.searchProducts = async (req, res, next) => {
   try {
-    const { q } = req.query;
+    const { q, category, brand } = req.query;
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
     const userRole = req.user?.role || 'guest';
 
+    // Build regex pattern for partial matching – escape special chars, split words
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const words = escaped.trim().split(/\s+/).filter(Boolean);
+    const regexPattern = words.map(w => `(?=.*${w})`).join('') + '.*';
+    const regex = new RegExp(regexPattern, 'i');
+
     const query = {
       status: PRODUCT_STATUS.ACTIVE,
-      $text: { $search: q },
+      $or: [
+        { name: regex },
+        { description: regex },
+        { shortDescription: regex },
+        { category: regex },
+        { tags: { $in: [new RegExp(escaped, 'i')] } },
+        { sku: regex },
+      ],
     };
+
+    // Apply optional filters
+    if (category) query.category = category;
+    if (brand) query.brand = brand;
 
     const [products, total] = await Promise.all([
       Product.find(query)
         .select('name slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images')
-        .sort({ score: { $meta: 'textScore' } })
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -268,6 +285,34 @@ exports.trackProductView = async (req, res, next) => {
       success: true,
       message: 'View tracked',
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.trackProductEvent = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { event, source, sessionId } = req.body;
+
+    const allowedEvents = [ANALYTICS_EVENTS.CART_ADD, ANALYTICS_EVENTS.WISHLIST_ADD, ANALYTICS_EVENTS.SHARE];
+    if (!allowedEvents.includes(event)) {
+      return res.status(400).json({ success: false, message: 'Invalid event type' });
+    }
+
+    await Analytics.create({
+      productId: id,
+      userId: req.user?._id || null,
+      eventType: event,
+      source: source || 'direct',
+      sessionId,
+      deviceInfo: {
+        platform: req.headers['x-platform'],
+        appVersion: req.headers['x-app-version'],
+      },
+    });
+
+    res.json({ success: true, message: 'Event tracked' });
   } catch (error) {
     next(error);
   }

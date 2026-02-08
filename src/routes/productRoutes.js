@@ -11,5 +11,6 @@ router.get('/featured', productController.getFeaturedProducts);
 router.get('/search', validate(productValidation.search, 'query'), productController.searchProducts);
 router.get('/:slug', productController.getProductBySlug);
 router.post('/:id/view', optionalAuth, productController.trackProductView);
+router.post('/:id/event', optionalAuth, productController.trackProductEvent);
 
 module.exports = router;

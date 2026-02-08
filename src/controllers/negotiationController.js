@@ -54,20 +54,13 @@ exports.createNegotiation = async (req, res, next) => {
   try {
     const { productId, quantity, pricePerUnit, message } = req.body;
 
-    if (req.user.role !== USER_ROLES.WHOLESALER) {
-      throw new ForbiddenError('Only wholesalers can create negotiations', 'WHOLESALER_ONLY');
-    }
-
     const product = await Product.findById(productId);
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
-    if (quantity < product.minBulkQuantity) {
-      throw new BadRequestError(
-        `Minimum quantity for bulk order is ${product.minBulkQuantity}`,
-        'MIN_QUANTITY_NOT_MET'
-      );
+    if (!product.negotiationEnabled) {
+      throw new BadRequestError('Negotiation is not enabled for this product', 'NEGOTIATION_DISABLED');
     }
 
     const settings = await Settings.getSettings();
@@ -81,7 +74,7 @@ exports.createNegotiation = async (req, res, next) => {
       productId,
       productSnapshot: {
         name: product.name,
-        price: product.price,
+        price: product.retailPrice,
         image: product.primaryImage,
         sku: product.sku,
       },
@@ -132,9 +125,12 @@ exports.getNegotiationById = async (req, res, next) => {
       throw new NotFoundError('Negotiation not found', 'NEGOTIATION_NOT_FOUND');
     }
 
+    const data = negotiation.toObject();
+    data.canPay = negotiation.status === NEGOTIATION_STATUS.ACCEPTED && !negotiation.orderId;
+
     res.json({
       success: true,
-      data: negotiation,
+      data,
     });
   } catch (error) {
     next(error);

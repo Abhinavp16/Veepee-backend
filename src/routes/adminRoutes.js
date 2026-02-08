@@ -45,6 +45,7 @@ router.put(
 );
 router.delete('/products/:id', adminProductController.deleteProduct);
 router.put('/products/:id/stock', validate(adminValidation.updateStock), adminProductController.updateStock);
+router.get('/products/:id/stock-logs', adminProductController.getStockLogs);
 router.delete('/products/:id/images/:imageId', adminProductController.deleteProductImage);
 
 // Negotiations

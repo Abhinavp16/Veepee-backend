@@ -20,22 +20,40 @@ exports.getMyOrders = async (req, res, next) => {
       Order.countDocuments(query),
     ]);
 
-    const formatted = orders.map(o => ({
-      id: o._id,
-      orderNumber: o.orderNumber,
-      orderType: o.orderType,
-      items: o.items.map(item => ({
-        name: item.productSnapshot.name,
-        quantity: item.quantity,
-        pricePerUnit: item.pricePerUnit,
-        totalPrice: item.totalPrice,
-        image: item.productSnapshot.image,
-      })),
-      total: o.total,
-      status: o.status,
-      trackingNumber: o.trackingNumber,
-      createdAt: o.createdAt,
-    }));
+    // Fetch payment info for all orders in one query
+    const orderIds = orders.map(o => o._id);
+    const payments = await Payment.find({ orderId: { $in: orderIds } }).lean();
+    const paymentMap = payments.reduce((acc, p) => {
+      acc[p.orderId.toString()] = p;
+      return acc;
+    }, {});
+
+    const formatted = orders.map(o => {
+      const payment = paymentMap[o._id.toString()];
+      return {
+        id: o._id,
+        orderNumber: o.orderNumber,
+        orderType: o.orderType,
+        items: o.items.map(item => ({
+          name: item.productSnapshot.name,
+          quantity: item.quantity,
+          pricePerUnit: item.pricePerUnit,
+          totalPrice: item.totalPrice,
+          image: item.productSnapshot.image,
+        })),
+        total: o.total,
+        status: o.status,
+        trackingNumber: o.trackingNumber,
+        createdAt: o.createdAt,
+        payment: payment ? {
+          status: payment.status,
+          screenshotUploaded: !!payment.screenshotUrl,
+          uploadedAt: payment.uploadedAt,
+          verifiedAt: payment.verifiedAt,
+          rejectionReason: payment.rejectionReason,
+        } : null,
+      };
+    });
 
     res.json({
       success: true,
@@ -76,7 +94,7 @@ exports.createOrderFromCart = async (req, res, next) => {
         );
       }
 
-      const itemTotal = product.price * item.quantity;
+      const itemTotal = product.retailPrice * item.quantity;
       orderItems.push({
         productId: product._id,
         productSnapshot: {
@@ -85,7 +103,7 @@ exports.createOrderFromCart = async (req, res, next) => {
           image: product.primaryImage,
         },
         quantity: item.quantity,
-        pricePerUnit: product.price,
+        pricePerUnit: product.retailPrice,
         totalPrice: itemTotal,
       });
       subtotal += itemTotal;
@@ -111,10 +129,10 @@ exports.createOrderFromCart = async (req, res, next) => {
       }],
     });
 
-    // Decrease stock
+    // Increment order count (stock deducted when admin confirms/processes)
     for (const item of orderItems) {
       await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -item.quantity, orderCount: 1 },
+        $inc: { orderCount: 1 },
       });
     }
 
@@ -211,9 +229,9 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
     negotiation.orderId = order._id;
     await negotiation.save();
 
-    // Decrease stock
+    // Increment order count (stock deducted when admin confirms/processes)
     await Product.findByIdAndUpdate(product._id, {
-      $inc: { stock: -negotiation.requestedQuantity, orderCount: 1 },
+      $inc: { orderCount: 1 },
     });
 
     // Create payment record

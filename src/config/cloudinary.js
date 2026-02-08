@@ -1,69 +1,54 @@
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
+const { getStorage } = require('./firebase');
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-const productImageStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'agrimart/products',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [{ width: 1000, height: 1000, crop: 'limit', quality: 'auto' }],
-  },
-});
-
-const paymentScreenshotStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'agrimart/payments',
-    allowed_formats: ['jpg', 'jpeg', 'png'],
-    transformation: [{ width: 1500, height: 2000, crop: 'limit', quality: 'auto' }],
-  },
-});
-
-const avatarStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'agrimart/avatars',
-    allowed_formats: ['jpg', 'jpeg', 'png'],
-    transformation: [{ width: 300, height: 300, crop: 'fill', gravity: 'face' }],
-  },
-});
+// All file uploads use memory storage — Firebase Storage handles persistence
+const memoryStorage = multer.memoryStorage();
 
 const uploadProductImages = multer({
-  storage: productImageStorage,
+  storage: memoryStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
-});
-
-const uploadPaymentScreenshot = multer({
-  storage: paymentScreenshotStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, and WebP images are allowed'), false);
+    }
+  },
 });
 
 const uploadAvatar = multer({
-  storage: avatarStorage,
+  storage: memoryStorage,
   limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (['image/jpeg', 'image/png'].includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG and PNG images are allowed'), false);
+    }
+  },
 });
 
 const deleteImage = async (publicId) => {
   try {
-    await cloudinary.uploader.destroy(publicId);
+    const bucket = getStorage();
+    if (!bucket) {
+      console.warn('Firebase Storage not configured, cannot delete image');
+      return false;
+    }
+    const file = bucket.file(publicId);
+    const [exists] = await file.exists();
+    if (exists) {
+      await file.delete();
+    }
     return true;
   } catch (error) {
-    console.error('Error deleting image from Cloudinary:', error);
+    console.error('Error deleting image from Firebase Storage:', error);
     return false;
   }
 };
 
 module.exports = {
-  cloudinary,
   uploadProductImages,
-  uploadPaymentScreenshot,
   uploadAvatar,
   deleteImage,
 };

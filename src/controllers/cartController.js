@@ -56,6 +56,42 @@ exports.getCart = async (req, res, next) => {
   }
 };
 
+const populateCartItems = async (cart) => {
+  const productIds = cart.items.map(item => item.productId);
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select('name slug retailPrice wholesalePrice stock images')
+    .lean();
+
+  const productMap = products.reduce((acc, p) => {
+    acc[p._id.toString()] = p;
+    return acc;
+  }, {});
+
+  const items = cart.items.map(item => {
+    const product = productMap[item.productId.toString()];
+    if (!product) return null;
+    return {
+      productId: item.productId,
+      product: {
+        name: product.name,
+        slug: product.slug,
+        price: product.retailPrice,
+        stock: product.stock,
+        image: product.images?.find(img => img.isPrimary)?.url || product.images?.[0]?.url,
+      },
+      quantity: item.quantity,
+      priceAtAdd: item.priceAtAdd,
+      currentPrice: product.retailPrice,
+      priceChanged: item.priceAtAdd !== product.retailPrice,
+      itemTotal: item.quantity * product.retailPrice,
+    };
+  }).filter(Boolean);
+
+  const subtotal = items.reduce((sum, item) => sum + item.itemTotal, 0);
+  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  return { items, subtotal, itemCount };
+};
+
 exports.addItem = async (req, res, next) => {
   try {
     const { productId, quantity } = req.body;
@@ -77,9 +113,11 @@ exports.addItem = async (req, res, next) => {
     cart.addItem(productId, quantity, product.retailPrice);
     await cart.save();
 
+    const data = await populateCartItems(cart);
     res.json({
       success: true,
       message: 'Item added to cart',
+      data,
     });
   } catch (error) {
     next(error);
@@ -108,9 +146,11 @@ exports.updateItemQuantity = async (req, res, next) => {
     cart.updateItemQuantity(productId, quantity);
     await cart.save();
 
+    const data = await populateCartItems(cart);
     res.json({
       success: true,
       message: 'Cart updated',
+      data,
     });
   } catch (error) {
     next(error);
@@ -129,9 +169,86 @@ exports.removeItem = async (req, res, next) => {
     cart.removeItem(productId);
     await cart.save();
 
+    const data = await populateCartItems(cart);
     res.json({
       success: true,
       message: 'Item removed from cart',
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.validateCart = async (req, res, next) => {
+  try {
+    const cart = await Cart.findOne({ userId: req.user._id });
+    if (!cart || cart.items.length === 0) {
+      return res.json({ success: true, data: { valid: true, issues: [] } });
+    }
+
+    const productIds = cart.items.map(item => item.productId);
+    const products = await Product.find({ _id: { $in: productIds } })
+      .select('name stock retailPrice status')
+      .lean();
+
+    const productMap = products.reduce((acc, p) => {
+      acc[p._id.toString()] = p;
+      return acc;
+    }, {});
+
+    const issues = [];
+
+    for (const item of cart.items) {
+      const product = productMap[item.productId.toString()];
+      if (!product) {
+        issues.push({
+          productId: item.productId.toString(),
+          type: 'unavailable',
+          message: 'This product is no longer available',
+          availableStock: 0,
+          requestedQty: item.quantity,
+        });
+        continue;
+      }
+      if (product.status !== 'active') {
+        issues.push({
+          productId: item.productId.toString(),
+          name: product.name,
+          type: 'unavailable',
+          message: `${product.name} is currently unavailable`,
+          availableStock: 0,
+          requestedQty: item.quantity,
+        });
+        continue;
+      }
+      if (product.stock === 0) {
+        issues.push({
+          productId: item.productId.toString(),
+          name: product.name,
+          type: 'out_of_stock',
+          message: `${product.name} is out of stock`,
+          availableStock: 0,
+          requestedQty: item.quantity,
+        });
+      } else if (product.stock < item.quantity) {
+        issues.push({
+          productId: item.productId.toString(),
+          name: product.name,
+          type: 'insufficient_stock',
+          message: `Only ${product.stock} units of ${product.name} available`,
+          availableStock: product.stock,
+          requestedQty: item.quantity,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        valid: issues.length === 0,
+        issues,
+      },
     });
   } catch (error) {
     next(error);

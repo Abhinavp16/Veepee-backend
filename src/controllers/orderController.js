@@ -80,6 +80,8 @@ exports.createOrderFromCart = async (req, res, next) => {
       return acc;
     }, {});
 
+    // Pre-check: collect all stock issues before creating order
+    const stockIssues = [];
     const orderItems = [];
     let subtotal = 0;
 
@@ -88,10 +90,16 @@ exports.createOrderFromCart = async (req, res, next) => {
       if (!product) continue;
 
       if (product.stock < item.quantity) {
-        throw new BadRequestError(
-          `Insufficient stock for ${product.name}`,
-          'INSUFFICIENT_STOCK'
-        );
+        stockIssues.push({
+          productId: item.productId.toString(),
+          name: product.name,
+          availableStock: product.stock,
+          requestedQty: item.quantity,
+          message: product.stock === 0
+            ? `${product.name} is out of stock`
+            : `Only ${product.stock} units of ${product.name} available (you requested ${item.quantity})`,
+        });
+        continue;
       }
 
       const itemTotal = product.retailPrice * item.quantity;
@@ -107,6 +115,20 @@ exports.createOrderFromCart = async (req, res, next) => {
         totalPrice: itemTotal,
       });
       subtotal += itemTotal;
+    }
+
+    if (stockIssues.length > 0) {
+      const msg = stockIssues.map(i => i.message).join('; ');
+      return res.status(400).json({
+        success: false,
+        message: msg,
+        code: 'INSUFFICIENT_STOCK',
+        data: { issues: stockIssues },
+      });
+    }
+
+    if (orderItems.length === 0) {
+      throw new BadRequestError('No valid items in cart', 'CART_EMPTY');
     }
 
     const order = await Order.create({

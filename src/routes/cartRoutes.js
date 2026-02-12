@@ -9,6 +9,7 @@ router.use(protect);
 router.use(authorize('buyer', 'wholesaler', 'admin'));
 
 router.get('/', cartController.getCart);
+router.post('/validate', cartController.validateCart);
 router.post('/items', validate(cartValidation.addItem), cartController.addItem);
 router.put('/items/:productId', validate(cartValidation.updateItem), cartController.updateItemQuantity);
 router.delete('/items/:productId', cartController.removeItem);

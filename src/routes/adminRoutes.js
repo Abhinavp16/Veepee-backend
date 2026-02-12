@@ -75,6 +75,7 @@ router.get('/analytics/dashboard', adminAnalyticsController.getDashboardStats);
 router.get('/analytics/products', adminAnalyticsController.getProductAnalytics);
 router.get('/analytics/sales', adminAnalyticsController.getSalesAnalytics);
 router.get('/analytics/demand', adminAnalyticsController.getDemandInsights);
+router.get('/analytics/potential-customers', adminAnalyticsController.getPotentialCustomers);
 
 // Settings
 router.get('/settings', adminSettingsController.getSettings);

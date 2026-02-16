@@ -46,6 +46,26 @@ const settingsSchema = new mongoose.Schema({
     maintenanceMode: { type: Boolean, default: false },
   },
 
+  heroBanners: [{
+    title: { type: String, required: true },
+    subtitle: String,
+    tag: String,
+    imageUrl: String,
+    linkUrl: String,
+    isActive: { type: Boolean, default: true },
+    order: { type: Number, default: 0 },
+  }],
+
+  promoBanners: [{
+    title: { type: String, required: true },
+    subtitle: String,
+    tag: String,
+    imageUrl: String,
+    linkUrl: String,
+    isActive: { type: Boolean, default: true },
+    order: { type: Number, default: 0 },
+  }],
+
   socialLinks: {
     whatsapp: String,
     instagram: String,

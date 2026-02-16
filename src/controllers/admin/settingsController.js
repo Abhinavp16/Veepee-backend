@@ -33,6 +33,8 @@ exports.updateSettings = async (req, res, next) => {
       'negotiationExpiryDays',
       'lowStockThreshold',
       'features',
+      'heroBanners',
+      'promoBanners',
       'socialLinks',
     ];
 

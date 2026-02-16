@@ -34,6 +34,24 @@ router.get('/', (req, res) => {
   });
 });
 
+// Public endpoint for hero banners, promo banners & whatsapp (no auth required)
+router.get('/settings/banners', async (req, res, next) => {
+  try {
+    const { Settings } = require('../models');
+    const settings = await Settings.getSettings();
+    const heroBanners = (settings.heroBanners || [])
+      .filter(b => b.isActive !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const promoBanners = (settings.promoBanners || [])
+      .filter(b => b.isActive !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const whatsapp = settings.socialLinks?.whatsapp || settings.businessPhone || '';
+    res.json({ success: true, data: { heroBanners, promoBanners, whatsapp } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.use('/auth', authRoutes);
 router.use('/products', productRoutes);
 router.use('/cart', cartRoutes);

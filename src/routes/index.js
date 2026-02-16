@@ -12,6 +12,7 @@ const companyRoutes = require('./companyRoutes');
 const categoryRoutes = require('./categoryRoutes');
 const uploadRoutes = require('./uploadRoutes');
 const notificationRoutes = require('./notificationRoutes');
+const razorpayRoutes = require('./razorpayRoutes');
 
 router.get('/', (req, res) => {
   res.json({
@@ -63,5 +64,38 @@ router.use('/companies', companyRoutes);
 router.use('/categories', categoryRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/razorpay', razorpayRoutes);
+
+// Public endpoint for payment options (no auth required)
+router.get('/settings/payment-options', async (req, res, next) => {
+  try {
+    const { Settings } = require('../models');
+    const settings = await Settings.getSettings();
+    
+    // Razorpay is enabled if env vars are set OR DB setting is true
+    const hasEnvRazorpay = !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+    const razorpayEnabled = hasEnvRazorpay || settings.razorpayEnabled || false;
+    const razorpayKeyId = process.env.RAZORPAY_KEY_ID || settings.razorpayKeyId || '';
+    
+    res.json({
+      success: true,
+      data: {
+        razorpayEnabled,
+        razorpayKeyId: razorpayEnabled ? razorpayKeyId : null,
+        bankTransferEnabled: settings.bankTransferEnabled !== false,
+        bankDetails: settings.bankTransferEnabled !== false ? {
+          bankName: settings.bankName || '',
+          accountNumber: settings.bankAccountNumber || '',
+          ifscCode: settings.bankIfscCode || '',
+          accountHolderName: settings.bankAccountHolderName || '',
+        } : null,
+        upiId: settings.upiId || '',
+        upiDisplayName: settings.upiDisplayName || '',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 module.exports = router;

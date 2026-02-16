@@ -36,6 +36,14 @@ exports.updateSettings = async (req, res, next) => {
       'heroBanners',
       'promoBanners',
       'socialLinks',
+      'razorpayKeyId',
+      'razorpayKeySecret',
+      'razorpayEnabled',
+      'bankName',
+      'bankAccountNumber',
+      'bankIfscCode',
+      'bankAccountHolderName',
+      'bankTransferEnabled',
     ];
 
     for (const field of allowedFields) {
@@ -43,6 +51,9 @@ exports.updateSettings = async (req, res, next) => {
         settings[field] = req.body[field];
       }
     }
+
+    console.log('[Settings Update] razorpayEnabled:', req.body.razorpayEnabled, '| bankTransferEnabled:', req.body.bankTransferEnabled);
+    console.log('[Settings Update] razorpayKeyId present:', !!req.body.razorpayKeyId);
 
     await settings.save();
 

@@ -71,6 +71,30 @@ const settingsSchema = new mongoose.Schema({
     instagram: String,
     facebook: String,
   },
+
+  // Razorpay Payment Gateway
+  razorpayKeyId: {
+    type: String,
+    default: '',
+  },
+  razorpayKeySecret: {
+    type: String,
+    default: '',
+  },
+  razorpayEnabled: {
+    type: Boolean,
+    default: false,
+  },
+
+  // Bank Transfer Details
+  bankName: String,
+  bankAccountNumber: String,
+  bankIfscCode: String,
+  bankAccountHolderName: String,
+  bankTransferEnabled: {
+    type: Boolean,
+    default: true,
+  },
 }, {
   timestamps: true,
 });

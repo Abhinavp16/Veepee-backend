@@ -24,9 +24,29 @@ const paymentSchema = new mongoose.Schema({
     required: true,
   },
 
+  method: {
+    type: String,
+    enum: ['bank_transfer', 'razorpay', 'upi_manual'],
+    default: 'bank_transfer',
+  },
+
   upiId: {
     type: String,
-    required: true,
+    default: null,
+  },
+
+  // Razorpay fields
+  razorpayOrderId: {
+    type: String,
+    default: null,
+  },
+  razorpayPaymentId: {
+    type: String,
+    default: null,
+  },
+  razorpaySignature: {
+    type: String,
+    default: null,
   },
 
   screenshotUrl: {

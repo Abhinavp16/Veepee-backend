@@ -1,4 +1,4 @@
-const { Order, Cart, Product, Negotiation, Payment, Settings } = require('../models');
+const { Order, Cart, Product, Negotiation, Payment, Settings, AffiliateCode } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS } = require('../utils/constants');
@@ -66,7 +66,27 @@ exports.getMyOrders = async (req, res, next) => {
 
 exports.createOrderFromCart = async (req, res, next) => {
   try {
-    const { shippingAddress, customerNote } = req.body;
+    const { shippingAddress, customerNote, affiliateCode } = req.body;
+
+    // Validate affiliate code if provided
+    let validAffiliateCode = null;
+    if (affiliateCode) {
+      const codeData = await AffiliateCode.findOne({
+        code: affiliateCode.toUpperCase(),
+        isActive: true,
+        startDate: { $lte: new Date() },
+      });
+
+      if (codeData) {
+        // Check expiry
+        if (!codeData.endDate || new Date(codeData.endDate) >= new Date()) {
+          // Check usage limit
+          if (codeData.usageLimit === 0 || codeData.usageCount < codeData.usageLimit) {
+            validAffiliateCode = codeData.code;
+          }
+        }
+      }
+    }
 
     const cart = await Cart.findOne({ userId: req.user._id });
     if (!cart || cart.items.length === 0) {
@@ -149,7 +169,15 @@ exports.createOrderFromCart = async (req, res, next) => {
         status: ORDER_STATUS.PENDING_PAYMENT,
         note: 'Order created',
       }],
+      affiliateCode: validAffiliateCode,
     });
+
+    if (validAffiliateCode) {
+      await AffiliateCode.findOneAndUpdate(
+        { code: validAffiliateCode },
+        { $inc: { usageCount: 1 } }
+      );
+    }
 
     // Increment order count (stock deducted when admin confirms/processes)
     for (const item of orderItems) {
@@ -192,7 +220,27 @@ exports.createOrderFromCart = async (req, res, next) => {
 
 exports.createOrderFromNegotiation = async (req, res, next) => {
   try {
-    const { negotiationId, shippingAddress, customerNote } = req.body;
+    const { negotiationId, shippingAddress, customerNote, affiliateCode } = req.body;
+
+    // Validate affiliate code if provided
+    let validAffiliateCode = null;
+    if (affiliateCode) {
+      const codeData = await AffiliateCode.findOne({
+        code: affiliateCode.toUpperCase(),
+        isActive: true,
+        startDate: { $lte: new Date() },
+      });
+
+      if (codeData) {
+        // Check expiry
+        if (!codeData.endDate || new Date(codeData.endDate) >= new Date()) {
+          // Check usage limit
+          if (codeData.usageLimit === 0 || codeData.usageCount < codeData.usageLimit) {
+            validAffiliateCode = codeData.code;
+          }
+        }
+      }
+    }
 
     const negotiation = await Negotiation.findOne({
       _id: negotiationId,
@@ -244,7 +292,15 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
         status: ORDER_STATUS.PENDING_PAYMENT,
         note: 'Order created from negotiation',
       }],
+      affiliateCode: validAffiliateCode,
     });
+
+    if (validAffiliateCode) {
+      await AffiliateCode.findOneAndUpdate(
+        { code: validAffiliateCode },
+        { $inc: { usageCount: 1 } }
+      );
+    }
 
     // Update negotiation
     negotiation.status = NEGOTIATION_STATUS.CONVERTED;

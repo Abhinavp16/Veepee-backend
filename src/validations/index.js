@@ -66,10 +66,19 @@ const authValidation = {
   updateProfile: Joi.object({
     name: Joi.string().max(100),
     avatar: Joi.string().uri().allow('', null),
+    phone: Joi.string().allow('', null),
+    address: Joi.string().allow('', null).max(500),
   }),
 
   fcmToken: Joi.object({
     fcmToken: Joi.string().required(),
+  }),
+  convertWholesaler: Joi.object({
+    businessName: Joi.string().required().max(200),
+    gstNumber: Joi.string().required().length(15),
+    businessAddress: Joi.string().required().max(500),
+    contactPerson: Joi.string().required().max(100),
+    phone: Joi.string().required(),
   }),
 };
 
@@ -139,6 +148,7 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
+    affiliateCode: Joi.string().uppercase().allow('', null),
   }),
 
   createFromNegotiation: Joi.object({
@@ -153,6 +163,7 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
+    affiliateCode: Joi.string().uppercase().allow('', null),
   }),
 };
 
@@ -292,6 +303,58 @@ const adminValidation = {
       instagram: Joi.string().allow('', null),
       facebook: Joi.string().allow('', null),
     }),
+  }),
+
+  createOffer: Joi.object({
+    title: Joi.string().required().max(200),
+    description: Joi.string().allow('', null),
+    discountType: Joi.string().valid('percentage', 'fixed').default('percentage'),
+    discountValue: Joi.number().min(0).required(),
+    code: Joi.string().uppercase().allow('', null),
+    targetGroup: Joi.string().valid('buyer', 'wholesaler', 'all').default('all'),
+    startDate: Joi.date().iso().default(Date.now),
+    endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
+    imageUrl: Joi.string().uri().allow('', null),
+    isActive: Joi.boolean().default(true),
+    minPurchaseAmount: Joi.number().min(0).default(0),
+    maxDiscountAmount: Joi.number().min(0).allow('', null),
+  }),
+
+  updateOffer: Joi.object({
+    title: Joi.string().max(200),
+    description: Joi.string().allow('', null),
+    discountType: Joi.string().valid('percentage', 'fixed'),
+    discountValue: Joi.number().min(0),
+    code: Joi.string().uppercase().allow('', null),
+    targetGroup: Joi.string().valid('buyer', 'wholesaler', 'all'),
+    startDate: Joi.date().iso(),
+    endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
+    imageUrl: Joi.string().uri().allow('', null),
+    isActive: Joi.boolean(),
+    minPurchaseAmount: Joi.number().min(0),
+    maxDiscountAmount: Joi.number().min(0).allow('', null),
+  }),
+
+  createAffiliateCode: Joi.object({
+    code: Joi.string().required().uppercase(),
+    personName: Joi.string().required().max(100),
+    discountType: Joi.string().valid('percentage', 'fixed').default('percentage'),
+    discountValue: Joi.number().min(0).required(),
+    usageLimit: Joi.number().integer().min(0).default(0),
+    startDate: Joi.date().iso().default(Date.now),
+    endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
+    isActive: Joi.boolean().default(true),
+  }),
+
+  updateAffiliateCode: Joi.object({
+    code: Joi.string().uppercase(),
+    personName: Joi.string().max(100),
+    discountType: Joi.string().valid('percentage', 'fixed'),
+    discountValue: Joi.number().min(0),
+    usageLimit: Joi.number().integer().min(0),
+    startDate: Joi.date().iso(),
+    endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
+    isActive: Joi.boolean(),
   }),
 };
 

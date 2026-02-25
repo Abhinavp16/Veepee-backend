@@ -19,5 +19,7 @@ router.post('/logout', protect, authController.logout);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
 router.post('/fcm-token', protect, validate(authValidation.fcmToken), authController.registerFcmToken);
+router.post('/convert-to-wholesaler', protect, validate(authValidation.convertWholesaler), authController.convertToWholesaler);
 
 module.exports = router;
+

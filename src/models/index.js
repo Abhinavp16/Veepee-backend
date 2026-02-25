@@ -11,6 +11,9 @@ const Company = require('./Company');
 const StockLog = require('./StockLog');
 const DeviceToken = require('./DeviceToken');
 const Notification = require('./Notification');
+const Offer = require('./Offer');
+const AffiliateCode = require('./AffiliateCode');
+const Review = require('./Review');
 
 module.exports = {
   User,
@@ -26,4 +29,7 @@ module.exports = {
   StockLog,
   DeviceToken,
   Notification,
+  Offer,
+  AffiliateCode,
+  Review,
 };

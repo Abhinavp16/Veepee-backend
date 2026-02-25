@@ -66,17 +66,46 @@ router.use('/upload', uploadRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/razorpay', razorpayRoutes);
 
+// Public endpoint for active offers (no auth required)
+router.get('/offers', async (req, res, next) => {
+  try {
+    const { Offer } = require('../models');
+    const { targetGroup } = req.query;
+
+    const query = { isActive: true };
+    if (targetGroup) {
+      query.targetGroup = { $in: [targetGroup, 'all'] };
+    }
+
+    const offers = await Offer.find(query).sort({ createdAt: -1 }).lean();
+    res.json({ success: true, data: offers });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Public endpoint for active reviews (no auth required)
+router.get('/reviews', async (req, res, next) => {
+  try {
+    const { Review } = require('../models');
+    const reviews = await Review.find({ isActive: true }).sort({ createdAt: -1 }).lean();
+    res.json({ success: true, data: reviews });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Public endpoint for payment options (no auth required)
 router.get('/settings/payment-options', async (req, res, next) => {
   try {
     const { Settings } = require('../models');
     const settings = await Settings.getSettings();
-    
+
     // Razorpay is enabled if env vars are set OR DB setting is true
     const hasEnvRazorpay = !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
     const razorpayEnabled = hasEnvRazorpay || settings.razorpayEnabled || false;
     const razorpayKeyId = process.env.RAZORPAY_KEY_ID || settings.razorpayKeyId || '';
-    
+
     res.json({
       success: true,
       data: {

@@ -22,6 +22,9 @@ const adminPaymentController = require('../controllers/admin/paymentController')
 const adminAnalyticsController = require('../controllers/admin/analyticsController');
 const adminSettingsController = require('../controllers/admin/settingsController');
 const adminCustomerController = require('../controllers/admin/customerController');
+const adminOfferController = require('../controllers/admin/offerController');
+const adminAffiliateController = require('../controllers/admin/affiliateCodeController');
+const adminReviewController = require('../controllers/admin/reviewController');
 
 const { adminValidation } = require('../validations');
 
@@ -80,5 +83,29 @@ router.get('/analytics/potential-customers', adminAnalyticsController.getPotenti
 // Settings
 router.get('/settings', adminSettingsController.getSettings);
 router.put('/settings', validate(adminValidation.updateSettings), adminSettingsController.updateSettings);
+
+// Offers
+router.get('/offers', adminOfferController.getOffers);
+router.post('/offers', validate(adminValidation.createOffer), adminOfferController.createOffer);
+router.get('/offers/:id', adminOfferController.getOfferById);
+router.put('/offers/:id', validate(adminValidation.updateOffer), adminOfferController.updateOffer);
+router.delete('/offers/:id', adminOfferController.deleteOffer);
+router.patch('/offers/:id/toggle', adminOfferController.toggleOfferStatus);
+
+// Affiliate Codes
+router.get('/affiliate-codes', adminAffiliateController.getAffiliateCodes);
+router.post('/affiliate-codes', validate(adminValidation.createAffiliateCode), adminAffiliateController.createAffiliateCode);
+router.get('/affiliate-codes/:id', adminAffiliateController.getAffiliateCodeById);
+router.put('/affiliate-codes/:id', validate(adminValidation.updateAffiliateCode), adminAffiliateController.updateAffiliateCode);
+router.delete('/affiliate-codes/:id', adminAffiliateController.deleteAffiliateCode);
+router.patch('/affiliate-codes/:id/toggle', adminAffiliateController.toggleAffiliateCodeStatus);
+router.get('/affiliate-codes/:id/usage', adminAffiliateController.getAffiliateCodeUsage);
+
+// Reviews
+router.get('/reviews', adminReviewController.getAllReviews);
+router.post('/reviews', adminReviewController.createReview);
+router.get('/reviews/:id', adminReviewController.getReview);
+router.put('/reviews/:id', adminReviewController.updateReview);
+router.delete('/reviews/:id', adminReviewController.deleteReview);
 
 module.exports = router;

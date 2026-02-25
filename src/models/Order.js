@@ -133,6 +133,12 @@ const orderSchema = new mongoose.Schema({
     type: String,
     maxlength: 500,
   },
+  affiliateCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: null,
+  },
 }, {
   timestamps: true,
 });

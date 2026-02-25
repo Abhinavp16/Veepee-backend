@@ -166,7 +166,7 @@ exports.loginWithPhone = async (req, res, next) => {
     if (expectedRole) {
       const isWholesaler = user.role === USER_ROLES.WHOLESALER;
       const expectsWholesaler = expectedRole === 'wholesaler';
-      
+
       if (isWholesaler && !expectsWholesaler) {
         throw new UnauthorizedError('This is a wholesaler account. Please use the Wholesaler login.', 'AUTH_ROLE_MISMATCH');
       }
@@ -272,7 +272,7 @@ exports.googleAuth = async (req, res, next) => {
 
     if (!user) {
       user = await User.findOne({ email: decodedToken.email });
-      
+
       if (user) {
         user.googleId = decodedToken.uid;
         user.authProvider = AUTH_PROVIDERS.GOOGLE;
@@ -359,7 +359,7 @@ exports.refreshToken = async (req, res, next) => {
     const { refreshToken } = req.body;
 
     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
-    
+
     const storedToken = await RefreshToken.findOne({
       token: refreshToken,
       userId: decoded.userId,
@@ -421,11 +421,13 @@ exports.getMe = async (req, res, next) => {
 
 exports.updateProfile = async (req, res, next) => {
   try {
-    const { name, avatar } = req.body;
+    const { name, avatar, phone, address } = req.body;
     const user = req.user;
 
     if (name) user.name = name;
     if (avatar !== undefined) user.avatar = avatar;
+    if (phone) user.phone = phone;
+    if (address !== undefined) user.address = address;
 
     await user.save();
 
@@ -452,6 +454,38 @@ exports.registerFcmToken = async (req, res, next) => {
     res.json({
       success: true,
       message: 'FCM token registered',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.convertToWholesaler = async (req, res, next) => {
+  try {
+    const { businessName, gstNumber, businessAddress, contactPerson, phone } = req.body;
+    const user = req.user;
+
+    // Update user role and business info
+    user.role = USER_ROLES.WHOLESALER;
+    user.businessInfo = {
+      ...user.businessInfo,
+      businessName,
+      gstNumber,
+      businessAddress, // We might need to add this to the model
+      contactPerson,
+      verified: false,
+    };
+
+    // Also update phone/name if changed? Usually contact person is just name
+    user.name = contactPerson || user.name;
+    user.phone = phone || user.phone;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Account converted to wholesaler successfully. Please wait for verification.',
+      data: sanitizeUser(user),
     });
   } catch (error) {
     next(error);

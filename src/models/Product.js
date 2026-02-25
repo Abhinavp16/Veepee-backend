@@ -9,6 +9,11 @@ const productSchema = new mongoose.Schema({
     trim: true,
     maxlength: [200, 'Name cannot exceed 200 characters'],
   },
+  nameHindi: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   slug: {
     type: String,
     unique: true,
@@ -16,7 +21,7 @@ const productSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    required: [true, 'Description is required'],
+    default: '',
   },
   shortDescription: {
     type: String,
@@ -53,7 +58,7 @@ const productSchema = new mongoose.Schema({
     required: [true, 'Wholesale price is required'],
     min: [0, 'Wholesale price cannot be negative'],
   },
-  
+
   // Bulk/Wholesale settings
   minWholesaleQuantity: {
     type: Number,
@@ -121,7 +126,7 @@ const productSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: Object.values(PRODUCT_STATUS),
-    default: PRODUCT_STATUS.DRAFT,
+    default: PRODUCT_STATUS.ACTIVE,
   },
   isFeatured: {
     type: Boolean,
@@ -149,6 +154,22 @@ const productSchema = new mongoose.Schema({
   negotiationCount: {
     type: Number,
     default: 0,
+  },
+  rating: {
+    type: Number,
+    default: 4.5,
+    min: [0, 'Rating cannot be less than 0'],
+    max: [5, 'Rating cannot exceed 5'],
+  },
+  purchaseCountMin: {
+    type: Number,
+    default: 0,
+    min: [0, 'Purchase count min cannot be negative'],
+  },
+  purchaseCountMax: {
+    type: Number,
+    default: 0,
+    min: [0, 'Purchase count max cannot be negative'],
   },
 }, {
   timestamps: true,

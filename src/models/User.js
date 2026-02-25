@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
   },
   email: {
     type: String,
+    unique: true,
     sparse: true,
     lowercase: true,
     trim: true,
@@ -20,6 +21,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     unique: true,
     sparse: true,
+    trim: true,
+  },
+  address: {
+    type: String,
+    default: null,
     trim: true,
   },
   avatar: {
@@ -34,7 +40,6 @@ const userSchema = new mongoose.Schema({
   },
   googleId: {
     type: String,
-    sparse: true,
   },
   passwordHash: {
     type: String,
@@ -50,6 +55,8 @@ const userSchema = new mongoose.Schema({
   businessInfo: {
     businessName: { type: String, default: null },
     gstNumber: { type: String, default: null },
+    businessAddress: { type: String, default: null },
+    contactPerson: { type: String, default: null },
     verified: { type: Boolean, default: false },
     verifiedAt: { type: Date, default: null },
   },
@@ -83,8 +90,6 @@ const userSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ phone: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ googleId: 1 }, { sparse: true });
 userSchema.index({ 'businessInfo.businessName': 'text' });
@@ -93,7 +98,7 @@ userSchema.pre('save', async function (next) {
   if (!this.isModified('passwordHash') || !this.passwordHash) {
     return next();
   }
-  
+
   const salt = await bcrypt.genSalt(12);
   this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
   next();

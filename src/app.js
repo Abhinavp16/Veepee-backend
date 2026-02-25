@@ -15,10 +15,7 @@ app.use(helmet());
 
 // CORS configuration
 app.use(cors({
-  origin: [
-    process.env.ADMIN_PANEL_URL || 'http://localhost:3000',
-    'http://localhost:3001',
-  ],
+  origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

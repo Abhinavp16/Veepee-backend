@@ -11,7 +11,7 @@ exports.getCart = async (req, res, next) => {
 
     const productIds = cart.items.map(item => item.productId);
     const products = await Product.find({ _id: { $in: productIds } })
-      .select('name slug retailPrice wholesalePrice stock images')
+      .select('name nameHindi slug retailPrice wholesalePrice stock images')
       .lean();
 
     const productMap = products.reduce((acc, p) => {
@@ -27,6 +27,7 @@ exports.getCart = async (req, res, next) => {
         productId: item.productId,
         product: {
           name: product.name,
+          nameHindi: product.nameHindi,
           slug: product.slug,
           price: product.retailPrice,
           stock: product.stock,
@@ -59,7 +60,7 @@ exports.getCart = async (req, res, next) => {
 const populateCartItems = async (cart) => {
   const productIds = cart.items.map(item => item.productId);
   const products = await Product.find({ _id: { $in: productIds } })
-    .select('name slug retailPrice wholesalePrice stock images')
+    .select('name nameHindi slug retailPrice wholesalePrice stock images')
     .lean();
 
   const productMap = products.reduce((acc, p) => {
@@ -74,6 +75,7 @@ const populateCartItems = async (cart) => {
       productId: item.productId,
       product: {
         name: product.name,
+        nameHindi: product.nameHindi,
         slug: product.slug,
         price: product.retailPrice,
         stock: product.stock,

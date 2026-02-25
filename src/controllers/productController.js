@@ -51,7 +51,7 @@ exports.getProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured')
+        .select('name nameHindi slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax')
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -64,6 +64,7 @@ exports.getProducts = async (req, res, next) => {
       return {
         id: p._id,
         name: p.name,
+        nameHindi: p.nameHindi,
         slug: p.slug,
         shortDescription: p.shortDescription,
         category: p.category,
@@ -72,6 +73,11 @@ exports.getProducts = async (req, res, next) => {
         inStock: p.stock > 0,
         primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
         isFeatured: p.isFeatured,
+        isHot: p.isHot,
+        isNew: p.isNew,
+        rating: p.rating,
+        purchaseCountMin: p.purchaseCountMin,
+        purchaseCountMax: p.purchaseCountMax,
       };
     });
 
@@ -88,7 +94,7 @@ exports.getProductBySlug = async (req, res, next) => {
   try {
     const userRole = req.user?.role || 'guest';
     const param = req.params.slug;
-    
+
     // Try finding by slug first, then by ID if it looks like a MongoDB ObjectId
     let product = await Product.findOne({
       slug: param,
@@ -167,12 +173,12 @@ exports.getCategories = async (req, res, next) => {
 exports.getFeaturedProducts = async (req, res, next) => {
   try {
     const userRole = req.user?.role || 'guest';
-    
+
     const products = await Product.find({
       status: PRODUCT_STATUS.ACTIVE,
       isFeatured: true,
     })
-      .select('name slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images')
+      .select('name slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax')
       .limit(10)
       .lean();
 
@@ -188,6 +194,11 @@ exports.getFeaturedProducts = async (req, res, next) => {
         stock: p.stock,
         inStock: p.stock > 0,
         primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
+        isHot: p.isHot,
+        isNew: p.isNew,
+        rating: p.rating,
+        purchaseCountMin: p.purchaseCountMin,
+        purchaseCountMax: p.purchaseCountMax,
       };
     });
 
@@ -230,7 +241,7 @@ exports.searchProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images')
+        .select('name nameHindi slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -243,6 +254,7 @@ exports.searchProducts = async (req, res, next) => {
       return {
         id: p._id,
         name: p.name,
+        nameHindi: p.nameHindi,
         slug: p.slug,
         shortDescription: p.shortDescription,
         category: p.category,
@@ -250,6 +262,11 @@ exports.searchProducts = async (req, res, next) => {
         stock: p.stock,
         inStock: p.stock > 0,
         primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
+        isHot: p.isHot,
+        isNew: p.isNew,
+        rating: p.rating,
+        purchaseCountMin: p.purchaseCountMin,
+        purchaseCountMax: p.purchaseCountMax,
       };
     });
 
@@ -317,3 +334,36 @@ exports.trackProductEvent = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.updateProductNameHindi = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { nameHindi } = req.body;
+
+    if (!nameHindi) {
+      return res.status(400).json({ success: false, message: 'nameHindi is required' });
+    }
+
+    const product = await Product.findByIdAndUpdate(
+      id,
+      { nameHindi },
+      { new: true, runValidators: true }
+    );
+
+    if (!product) {
+      throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: product._id,
+        name: product.name,
+        nameHindi: product.nameHindi,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

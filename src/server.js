@@ -9,13 +9,13 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await connectDB();
-    
+
     // Initialize Firebase (optional - will warn if not configured)
     initializeFirebase();
-    
-    app.listen(PORT, () => {
+
+    app.listen(PORT, '0.0.0.0', () => {
       logger.info(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-      logger.info(`📚 API Docs: http://localhost:${PORT}/api/v1`);
+      logger.info(`📚 API Docs: http://${process.env.HOST || 'localhost'}:${PORT}/api/v1`);
     });
   } catch (error) {
     logger.error('Failed to start server:', error);

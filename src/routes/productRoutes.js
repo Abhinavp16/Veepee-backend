@@ -12,5 +12,6 @@ router.get('/search', validate(productValidation.search, 'query'), productContro
 router.get('/:slug', productController.getProductBySlug);
 router.post('/:id/view', optionalAuth, productController.trackProductView);
 router.post('/:id/event', optionalAuth, productController.trackProductEvent);
+router.patch('/:id/hindi-name', productController.updateProductNameHindi);
 
 module.exports = router;

@@ -148,7 +148,12 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
+    couponCode: Joi.string().uppercase().allow('', null),
     affiliateCode: Joi.string().uppercase().allow('', null),
+  }),
+
+  previewCoupon: Joi.object({
+    couponCode: Joi.string().trim().uppercase().required(),
   }),
 
   createFromNegotiation: Joi.object({
@@ -163,6 +168,7 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
+    couponCode: Joi.string().uppercase().allow('', null),
     affiliateCode: Joi.string().uppercase().allow('', null),
   }),
 };

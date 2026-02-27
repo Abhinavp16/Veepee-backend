@@ -50,6 +50,7 @@ router.delete('/products/:id', adminProductController.deleteProduct);
 router.put('/products/:id/stock', validate(adminValidation.updateStock), adminProductController.updateStock);
 router.get('/products/:id/stock-logs', adminProductController.getStockLogs);
 router.delete('/products/:id/images/:imageId', adminProductController.deleteProductImage);
+router.post('/products/hindi-names/generate-missing', adminProductController.generateMissingHindiNames);
 
 // Negotiations
 router.get('/negotiations', adminNegotiationController.getNegotiations);

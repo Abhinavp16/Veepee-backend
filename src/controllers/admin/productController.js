@@ -3,6 +3,8 @@ const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse, generateSKU } = require('../../utils/helpers');
 const { deleteImage } = require('../../config/cloudinary');
 const { getStorage } = require('../../config/firebase');
+const { transliterateToHindi } = require('../../services/hindiTransliterationService');
+const { PRODUCT_STATUS } = require('../../utils/constants');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const slugify = require('slugify');
@@ -332,6 +334,106 @@ exports.deleteProductImage = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Image deleted successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.generateMissingHindiNames = async (req, res, next) => {
+  try {
+    const requestedBatchSize = Number(req.body?.batchSize ?? req.query.batchSize ?? 0);
+    const batchSize = Number.isFinite(requestedBatchSize) && requestedBatchSize > 0
+      ? Math.min(requestedBatchSize, 5000)
+      : 0;
+
+    const query = {
+      status: { $ne: PRODUCT_STATUS.ARCHIVED },
+      $or: [
+        { nameHindi: { $exists: false } },
+        { nameHindi: null },
+        { nameHindi: '' },
+      ],
+    };
+
+    let finder = Product.find(query).select('_id name nameHindi').sort({ createdAt: 1 }).lean();
+    if (batchSize > 0) {
+      finder = finder.limit(batchSize);
+    }
+
+    const products = await finder;
+    if (products.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No products require Hindi name conversion',
+        data: {
+          processed: 0,
+          updated: 0,
+          skipped: 0,
+          failed: 0,
+        },
+      });
+    }
+
+    const updates = [];
+    const failedProducts = [];
+    let skipped = 0;
+
+    const processProduct = async (product) => {
+      const englishName = (product.name || '').trim();
+      if (!englishName) {
+        skipped += 1;
+        failedProducts.push({
+          id: product._id.toString(),
+          reason: 'Missing English product name',
+        });
+        return;
+      }
+
+      try {
+        const hindiName = await transliterateToHindi(englishName);
+        if (!hindiName || !hindiName.trim() || hindiName.trim() === englishName) {
+          skipped += 1;
+          return;
+        }
+
+        updates.push({
+          updateOne: {
+            filter: { _id: product._id },
+            update: { $set: { nameHindi: hindiName.trim() } },
+          },
+        });
+      } catch (error) {
+        skipped += 1;
+        failedProducts.push({
+          id: product._id.toString(),
+          name: englishName,
+          reason: error.message || 'Transliteration failed',
+        });
+      }
+    };
+
+    // Small concurrency to avoid external API bursts while keeping execution reasonable.
+    const concurrency = 5;
+    for (let i = 0; i < products.length; i += concurrency) {
+      const chunk = products.slice(i, i + concurrency);
+      await Promise.all(chunk.map(processProduct));
+    }
+
+    if (updates.length > 0) {
+      await Product.bulkWrite(updates, { ordered: false });
+    }
+
+    res.json({
+      success: true,
+      message: `Hindi name conversion completed. Updated ${updates.length} products.`,
+      data: {
+        processed: products.length,
+        updated: updates.length,
+        skipped,
+        failed: failedProducts.length,
+        failedProducts: failedProducts.slice(0, 20),
+      },
     });
   } catch (error) {
     next(error);

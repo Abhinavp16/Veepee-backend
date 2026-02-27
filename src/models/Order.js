@@ -139,6 +139,12 @@ const orderSchema = new mongoose.Schema({
     uppercase: true,
     default: null,
   },
+  offerCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: null,
+  },
 }, {
   timestamps: true,
 });

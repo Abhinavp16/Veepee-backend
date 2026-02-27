@@ -2,6 +2,7 @@ const { Product, Analytics } = require('../models');
 const { NotFoundError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS, ANALYTICS_EVENTS } = require('../utils/constants');
+const mongoose = require('mongoose');
 
 // Helper to get price based on user role
 const getPriceForUser = (product, userRole) => {
@@ -339,6 +340,14 @@ exports.updateProductNameHindi = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { nameHindi } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product id',
+        code: 'INVALID_PRODUCT_ID',
+      });
+    }
 
     if (!nameHindi) {
       return res.status(400).json({ success: false, message: 'nameHindi is required' });

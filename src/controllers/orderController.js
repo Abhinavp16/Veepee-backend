@@ -1,7 +1,156 @@
-const { Order, Cart, Product, Negotiation, Payment, Settings, AffiliateCode } = require('../models');
+const { Order, Cart, Product, Negotiation, Payment, Settings, AffiliateCode, Offer } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
-const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS } = require('../utils/constants');
+const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
+
+const validateAffiliateCode = async (affiliateCode) => {
+  if (!affiliateCode || !affiliateCode.trim()) return null;
+
+  const codeData = await AffiliateCode.findOne({
+    code: affiliateCode.trim().toUpperCase(),
+    isActive: true,
+    startDate: { $lte: new Date() },
+  });
+
+  if (!codeData) return null;
+  if (codeData.endDate && new Date(codeData.endDate) < new Date()) return null;
+  if (codeData.usageLimit !== 0 && codeData.usageCount >= codeData.usageLimit) return null;
+
+  return codeData.code;
+};
+
+const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
+  let discount = 0;
+
+  if (discountType === 'percentage') {
+    discount = (subtotal * discountValue) / 100;
+  } else {
+    discount = discountValue;
+  }
+
+  if (maxDiscountAmount && discount > maxDiscountAmount) {
+    discount = maxDiscountAmount;
+  }
+
+  if (discount > subtotal) {
+    discount = subtotal;
+  }
+
+  return Number(discount.toFixed(2));
+};
+
+const resolveOfferDiscount = async ({ couponCode, subtotal, userRole }) => {
+  if (!couponCode || !couponCode.trim()) {
+    return { offerCode: null, discount: 0 };
+  }
+
+  const normalizedCode = couponCode.trim().toUpperCase();
+  const now = new Date();
+  const targetGroup = userRole === USER_ROLES.WHOLESALER
+    ? USER_ROLES.WHOLESALER
+    : USER_ROLES.BUYER;
+
+  const offer = await Offer.findOne({
+    code: normalizedCode,
+    isActive: true,
+    startDate: { $lte: now },
+    targetGroup: { $in: [targetGroup, 'all'] },
+    $or: [
+      { endDate: null },
+      { endDate: { $exists: false } },
+      { endDate: { $gte: now } },
+    ],
+  });
+
+  if (!offer) {
+    throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
+  }
+
+  if (subtotal < (offer.minPurchaseAmount || 0)) {
+    throw new BadRequestError(
+      `Minimum purchase amount for this coupon is ₹${offer.minPurchaseAmount}`,
+      'COUPON_MIN_PURCHASE_NOT_MET'
+    );
+  }
+
+  const discount = calculateDiscount(
+    subtotal,
+    offer.discountType,
+    offer.discountValue,
+    offer.maxDiscountAmount
+  );
+
+  if (discount <= 0) {
+    throw new BadRequestError('Coupon is not applicable for this order', 'COUPON_NOT_APPLICABLE');
+  }
+
+  return {
+    offerCode: offer.code,
+    discount,
+  };
+};
+
+const getCurrentCartPricing = async (userId) => {
+  const cart = await Cart.findOne({ userId });
+  if (!cart || cart.items.length === 0) {
+    throw new BadRequestError('Cart is empty', 'CART_EMPTY');
+  }
+
+  const productIds = cart.items.map(item => item.productId);
+  const products = await Product.find({ _id: { $in: productIds } }).select('retailPrice');
+  const productMap = products.reduce((acc, p) => {
+    acc[p._id.toString()] = p;
+    return acc;
+  }, {});
+
+  let subtotal = 0;
+  let itemCount = 0;
+
+  for (const item of cart.items) {
+    const product = productMap[item.productId.toString()];
+    if (!product) continue;
+    subtotal += product.retailPrice * item.quantity;
+    itemCount += item.quantity;
+  }
+
+  if (subtotal <= 0 || itemCount <= 0) {
+    throw new BadRequestError('No valid items in cart', 'CART_EMPTY');
+  }
+
+  return { subtotal, itemCount };
+};
+
+exports.previewCouponForCart = async (req, res, next) => {
+  try {
+    const { couponCode } = req.body;
+    const { subtotal, itemCount } = await getCurrentCartPricing(req.user._id);
+    const { offerCode, discount } = await resolveOfferDiscount({
+      couponCode,
+      subtotal,
+      userRole: req.user.role,
+    });
+
+    const deliveryFee = subtotal > 0 ? 50 : 0;
+    const totalBeforeDiscount = subtotal + deliveryFee;
+    const payableTotal = Math.max(totalBeforeDiscount - discount, 0);
+
+    res.json({
+      success: true,
+      message: 'Coupon applied successfully',
+      data: {
+        couponCode: offerCode,
+        itemCount,
+        subtotal,
+        deliveryFee,
+        totalBeforeDiscount,
+        discount,
+        payableTotal,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 exports.getMyOrders = async (req, res, next) => {
   try {
@@ -66,27 +215,9 @@ exports.getMyOrders = async (req, res, next) => {
 
 exports.createOrderFromCart = async (req, res, next) => {
   try {
-    const { shippingAddress, customerNote, affiliateCode } = req.body;
+    const { shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
 
-    // Validate affiliate code if provided
-    let validAffiliateCode = null;
-    if (affiliateCode) {
-      const codeData = await AffiliateCode.findOne({
-        code: affiliateCode.toUpperCase(),
-        isActive: true,
-        startDate: { $lte: new Date() },
-      });
-
-      if (codeData) {
-        // Check expiry
-        if (!codeData.endDate || new Date(codeData.endDate) >= new Date()) {
-          // Check usage limit
-          if (codeData.usageLimit === 0 || codeData.usageCount < codeData.usageLimit) {
-            validAffiliateCode = codeData.code;
-          }
-        }
-      }
-    }
+    const validAffiliateCode = await validateAffiliateCode(affiliateCode);
 
     const cart = await Cart.findOne({ userId: req.user._id });
     if (!cart || cart.items.length === 0) {
@@ -151,6 +282,13 @@ exports.createOrderFromCart = async (req, res, next) => {
       throw new BadRequestError('No valid items in cart', 'CART_EMPTY');
     }
 
+    const { offerCode, discount } = await resolveOfferDiscount({
+      couponCode,
+      subtotal,
+      userRole: req.user.role,
+    });
+    const total = Math.max(subtotal - discount, 0);
+
     const order = await Order.create({
       userId: req.user._id,
       customerSnapshot: {
@@ -161,8 +299,8 @@ exports.createOrderFromCart = async (req, res, next) => {
       orderType: ORDER_TYPES.RETAIL,
       items: orderItems,
       subtotal,
-      discount: 0,
-      total: subtotal,
+      discount,
+      total,
       shippingAddress,
       customerNote,
       statusHistory: [{
@@ -170,7 +308,15 @@ exports.createOrderFromCart = async (req, res, next) => {
         note: 'Order created',
       }],
       affiliateCode: validAffiliateCode,
+      offerCode,
     });
+
+    if (offerCode) {
+      await Offer.findOneAndUpdate(
+        { code: offerCode },
+        { $inc: { usageCount: 1 } }
+      );
+    }
 
     if (validAffiliateCode) {
       await AffiliateCode.findOneAndUpdate(
@@ -205,8 +351,10 @@ exports.createOrderFromCart = async (req, res, next) => {
       data: {
         orderId: order._id,
         orderNumber: order.orderNumber,
+        discount: order.discount,
         total: order.total,
         status: order.status,
+        offerCode: order.offerCode,
         upiDetails: {
           upiId: settings.upiId,
           displayName: settings.upiDisplayName,
@@ -220,27 +368,9 @@ exports.createOrderFromCart = async (req, res, next) => {
 
 exports.createOrderFromNegotiation = async (req, res, next) => {
   try {
-    const { negotiationId, shippingAddress, customerNote, affiliateCode } = req.body;
+    const { negotiationId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
 
-    // Validate affiliate code if provided
-    let validAffiliateCode = null;
-    if (affiliateCode) {
-      const codeData = await AffiliateCode.findOne({
-        code: affiliateCode.toUpperCase(),
-        isActive: true,
-        startDate: { $lte: new Date() },
-      });
-
-      if (codeData) {
-        // Check expiry
-        if (!codeData.endDate || new Date(codeData.endDate) >= new Date()) {
-          // Check usage limit
-          if (codeData.usageLimit === 0 || codeData.usageCount < codeData.usageLimit) {
-            validAffiliateCode = codeData.code;
-          }
-        }
-      }
-    }
+    const validAffiliateCode = await validateAffiliateCode(affiliateCode);
 
     const negotiation = await Negotiation.findOne({
       _id: negotiationId,
@@ -261,6 +391,14 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
     if (product.stock < negotiation.requestedQuantity) {
       throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
     }
+
+    const subtotal = negotiation.finalTotalPrice;
+    const { offerCode, discount } = await resolveOfferDiscount({
+      couponCode,
+      subtotal,
+      userRole: req.user.role,
+    });
+    const total = Math.max(subtotal - discount, 0);
 
     const order = await Order.create({
       userId: req.user._id,
@@ -283,9 +421,9 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
         pricePerUnit: negotiation.finalPricePerUnit,
         totalPrice: negotiation.finalTotalPrice,
       }],
-      subtotal: negotiation.finalTotalPrice,
-      discount: 0,
-      total: negotiation.finalTotalPrice,
+      subtotal,
+      discount,
+      total,
       shippingAddress,
       customerNote,
       statusHistory: [{
@@ -293,7 +431,15 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
         note: 'Order created from negotiation',
       }],
       affiliateCode: validAffiliateCode,
+      offerCode,
     });
+
+    if (offerCode) {
+      await Offer.findOneAndUpdate(
+        { code: offerCode },
+        { $inc: { usageCount: 1 } }
+      );
+    }
 
     if (validAffiliateCode) {
       await AffiliateCode.findOneAndUpdate(
@@ -327,8 +473,10 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       data: {
         orderId: order._id,
         orderNumber: order.orderNumber,
+        discount: order.discount,
         total: order.total,
         status: order.status,
+        offerCode: order.offerCode,
         upiDetails: {
           upiId: settings.upiId,
           displayName: settings.upiDisplayName,

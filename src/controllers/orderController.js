@@ -3,22 +3,6 @@ const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
 
-const validateAffiliateCode = async (affiliateCode) => {
-  if (!affiliateCode || !affiliateCode.trim()) return null;
-
-  const codeData = await AffiliateCode.findOne({
-    code: affiliateCode.trim().toUpperCase(),
-    isActive: true,
-    startDate: { $lte: new Date() },
-  });
-
-  if (!codeData) return null;
-  if (codeData.endDate && new Date(codeData.endDate) < new Date()) return null;
-  if (codeData.usageLimit !== 0 && codeData.usageCount >= codeData.usageLimit) return null;
-
-  return codeData.code;
-};
-
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
 
@@ -39,13 +23,119 @@ const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmo
   return Number(discount.toFixed(2));
 };
 
-const resolveOfferDiscount = async ({ couponCode, subtotal, userRole }) => {
+const normalizeDiscountRules = (rules = []) => {
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .map((rule) => ({
+      minPurchaseAmount: Number(rule?.minPurchaseAmount || 0),
+      discountType: rule?.discountType === 'fixed' ? 'fixed' : 'percentage',
+      discountValue: Number(rule?.discountValue || 0),
+      maxDiscountAmount: rule?.maxDiscountAmount === null || rule?.maxDiscountAmount === undefined || rule?.maxDiscountAmount === ''
+        ? undefined
+        : Number(rule.maxDiscountAmount),
+    }))
+    .filter((rule) => rule.discountValue >= 0 && rule.minPurchaseAmount >= 0)
+    .sort((a, b) => b.minPurchaseAmount - a.minPurchaseAmount);
+};
+
+const pickDiscountRule = (subtotal, rules, fallback) => {
+  const normalizedRules = normalizeDiscountRules(rules);
+  if (normalizedRules.length > 0) {
+    const matchedRule = normalizedRules.find((rule) => subtotal >= rule.minPurchaseAmount);
+    if (!matchedRule) {
+      const minRequired = Math.min(...normalizedRules.map((rule) => rule.minPurchaseAmount));
+      return { matchedRule: null, minRequired };
+    }
+    return { matchedRule, minRequired: matchedRule.minPurchaseAmount };
+  }
+
+  return {
+    matchedRule: {
+      minPurchaseAmount: Number(fallback?.minPurchaseAmount || 0),
+      discountType: fallback?.discountType || 'percentage',
+      discountValue: Number(fallback?.discountValue || 0),
+      maxDiscountAmount: fallback?.maxDiscountAmount,
+    },
+    minRequired: Number(fallback?.minPurchaseAmount || 0),
+  };
+};
+
+const validateAffiliateCandidate = (affiliate) => {
+  const now = new Date();
+
+  if (!affiliate.isActive) {
+    throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
+  }
+
+  if (new Date(affiliate.startDate) > now) {
+    throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
+  }
+
+  if (affiliate.endDate && new Date(affiliate.endDate) < now) {
+    throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
+  }
+
+  if (affiliate.usageLimit !== 0 && affiliate.usageCount >= affiliate.usageLimit) {
+    throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
+  }
+};
+
+const resolveCouponDiscount = async ({ couponCode, subtotal, userRole }) => {
   if (!couponCode || !couponCode.trim()) {
-    return { offerCode: null, discount: 0 };
+    return {
+      discountSource: null,
+      discount: 0,
+      offerCode: null,
+      affiliateCode: null,
+      affiliateMeta: null,
+    };
   }
 
   const normalizedCode = couponCode.trim().toUpperCase();
   const now = new Date();
+
+  // Affiliate has precedence on collision.
+  const affiliate = await AffiliateCode.findOne({ code: normalizedCode });
+  if (affiliate) {
+    validateAffiliateCandidate(affiliate);
+
+    const { matchedRule, minRequired } = pickDiscountRule(subtotal, affiliate.discountRules, {
+      minPurchaseAmount: 0,
+      discountType: affiliate.discountType,
+      discountValue: affiliate.discountValue,
+      maxDiscountAmount: undefined,
+    });
+
+    if (!matchedRule) {
+      throw new BadRequestError(
+        `Minimum purchase amount for this coupon is ₹${minRequired}`,
+        'COUPON_MIN_PURCHASE_NOT_MET'
+      );
+    }
+
+    const discount = calculateDiscount(
+      subtotal,
+      matchedRule.discountType,
+      matchedRule.discountValue,
+      matchedRule.maxDiscountAmount
+    );
+
+    if (discount <= 0) {
+      throw new BadRequestError('Coupon is not applicable for this order', 'COUPON_NOT_APPLICABLE');
+    }
+
+    return {
+      discountSource: 'affiliate',
+      discount,
+      offerCode: null,
+      affiliateCode: affiliate.code,
+      affiliateMeta: {
+        id: affiliate._id,
+        personName: affiliate.personName,
+      },
+    };
+  }
+
   const targetGroup = userRole === USER_ROLES.WHOLESALER
     ? USER_ROLES.WHOLESALER
     : USER_ROLES.BUYER;
@@ -66,18 +156,25 @@ const resolveOfferDiscount = async ({ couponCode, subtotal, userRole }) => {
     throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
   }
 
-  if (subtotal < (offer.minPurchaseAmount || 0)) {
+  const { matchedRule, minRequired } = pickDiscountRule(subtotal, offer.discountRules, {
+    minPurchaseAmount: offer.minPurchaseAmount || 0,
+    discountType: offer.discountType,
+    discountValue: offer.discountValue,
+    maxDiscountAmount: offer.maxDiscountAmount,
+  });
+
+  if (!matchedRule || subtotal < (minRequired || 0)) {
     throw new BadRequestError(
-      `Minimum purchase amount for this coupon is ₹${offer.minPurchaseAmount}`,
+      `Minimum purchase amount for this coupon is ₹${minRequired}`,
       'COUPON_MIN_PURCHASE_NOT_MET'
     );
   }
 
   const discount = calculateDiscount(
     subtotal,
-    offer.discountType,
-    offer.discountValue,
-    offer.maxDiscountAmount
+    matchedRule.discountType,
+    matchedRule.discountValue,
+    matchedRule.maxDiscountAmount
   );
 
   if (discount <= 0) {
@@ -85,7 +182,10 @@ const resolveOfferDiscount = async ({ couponCode, subtotal, userRole }) => {
   }
 
   return {
+    discountSource: 'offer',
     offerCode: offer.code,
+    affiliateCode: null,
+    affiliateMeta: null,
     discount,
   };
 };
@@ -124,7 +224,13 @@ exports.previewCouponForCart = async (req, res, next) => {
   try {
     const { couponCode } = req.body;
     const { subtotal, itemCount } = await getCurrentCartPricing(req.user._id);
-    const { offerCode, discount } = await resolveOfferDiscount({
+    const {
+      discountSource,
+      offerCode,
+      affiliateCode,
+      affiliateMeta,
+      discount,
+    } = await resolveCouponDiscount({
       couponCode,
       subtotal,
       userRole: req.user.role,
@@ -138,7 +244,10 @@ exports.previewCouponForCart = async (req, res, next) => {
       success: true,
       message: 'Coupon applied successfully',
       data: {
-        couponCode: offerCode,
+        couponCode: offerCode || affiliateCode,
+        discountSource,
+        affiliateCode,
+        affiliatePersonName: affiliateMeta?.personName || null,
         itemCount,
         subtotal,
         deliveryFee,
@@ -216,8 +325,7 @@ exports.getMyOrders = async (req, res, next) => {
 exports.createOrderFromCart = async (req, res, next) => {
   try {
     const { shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
-
-    const validAffiliateCode = await validateAffiliateCode(affiliateCode);
+    const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
 
     const cart = await Cart.findOne({ userId: req.user._id });
     if (!cart || cart.items.length === 0) {
@@ -282,8 +390,13 @@ exports.createOrderFromCart = async (req, res, next) => {
       throw new BadRequestError('No valid items in cart', 'CART_EMPTY');
     }
 
-    const { offerCode, discount } = await resolveOfferDiscount({
-      couponCode,
+    const {
+      discountSource,
+      offerCode,
+      affiliateCode: resolvedAffiliateCode,
+      discount,
+    } = await resolveCouponDiscount({
+      couponCode: inputCode,
       subtotal,
       userRole: req.user.role,
     });
@@ -300,6 +413,8 @@ exports.createOrderFromCart = async (req, res, next) => {
       items: orderItems,
       subtotal,
       discount,
+      discountSource,
+      affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
       total,
       shippingAddress,
       customerNote,
@@ -307,20 +422,18 @@ exports.createOrderFromCart = async (req, res, next) => {
         status: ORDER_STATUS.PENDING_PAYMENT,
         note: 'Order created',
       }],
-      affiliateCode: validAffiliateCode,
+      affiliateCode: resolvedAffiliateCode,
       offerCode,
     });
 
-    if (offerCode) {
+    if (discountSource === 'offer' && offerCode) {
       await Offer.findOneAndUpdate(
         { code: offerCode },
         { $inc: { usageCount: 1 } }
       );
-    }
-
-    if (validAffiliateCode) {
+    } else if (discountSource === 'affiliate' && resolvedAffiliateCode) {
       await AffiliateCode.findOneAndUpdate(
-        { code: validAffiliateCode },
+        { code: resolvedAffiliateCode },
         { $inc: { usageCount: 1 } }
       );
     }
@@ -355,6 +468,8 @@ exports.createOrderFromCart = async (req, res, next) => {
         total: order.total,
         status: order.status,
         offerCode: order.offerCode,
+        affiliateCode: order.affiliateCode,
+        discountSource: order.discountSource,
         upiDetails: {
           upiId: settings.upiId,
           displayName: settings.upiDisplayName,
@@ -369,8 +484,7 @@ exports.createOrderFromCart = async (req, res, next) => {
 exports.createOrderFromNegotiation = async (req, res, next) => {
   try {
     const { negotiationId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
-
-    const validAffiliateCode = await validateAffiliateCode(affiliateCode);
+    const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
 
     const negotiation = await Negotiation.findOne({
       _id: negotiationId,
@@ -393,8 +507,13 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
     }
 
     const subtotal = negotiation.finalTotalPrice;
-    const { offerCode, discount } = await resolveOfferDiscount({
-      couponCode,
+    const {
+      discountSource,
+      offerCode,
+      affiliateCode: resolvedAffiliateCode,
+      discount,
+    } = await resolveCouponDiscount({
+      couponCode: inputCode,
       subtotal,
       userRole: req.user.role,
     });
@@ -423,6 +542,8 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       }],
       subtotal,
       discount,
+      discountSource,
+      affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
       total,
       shippingAddress,
       customerNote,
@@ -430,20 +551,18 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
         status: ORDER_STATUS.PENDING_PAYMENT,
         note: 'Order created from negotiation',
       }],
-      affiliateCode: validAffiliateCode,
+      affiliateCode: resolvedAffiliateCode,
       offerCode,
     });
 
-    if (offerCode) {
+    if (discountSource === 'offer' && offerCode) {
       await Offer.findOneAndUpdate(
         { code: offerCode },
         { $inc: { usageCount: 1 } }
       );
-    }
-
-    if (validAffiliateCode) {
+    } else if (discountSource === 'affiliate' && resolvedAffiliateCode) {
       await AffiliateCode.findOneAndUpdate(
-        { code: validAffiliateCode },
+        { code: resolvedAffiliateCode },
         { $inc: { usageCount: 1 } }
       );
     }
@@ -477,6 +596,8 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
         total: order.total,
         status: order.status,
         offerCode: order.offerCode,
+        affiliateCode: order.affiliateCode,
+        discountSource: order.discountSource,
         upiDetails: {
           upiId: settings.upiId,
           displayName: settings.upiDisplayName,

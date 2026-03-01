@@ -93,6 +93,21 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  discountSource: {
+    type: String,
+    enum: ['affiliate', 'offer'],
+    default: null,
+  },
+  affiliateDiscountAmount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  commissionAmount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   total: {
     type: Number,
     required: true,

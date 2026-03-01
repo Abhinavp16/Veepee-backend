@@ -1,6 +1,7 @@
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { Order, Payment, Settings } = require('../models');
+const { creditAffiliateCommissionForOrder } = require('../services/affiliateCommissionService');
 
 // Get Razorpay credentials - env vars take priority, then DB settings
 const getRazorpayCredentials = async () => {
@@ -156,6 +157,8 @@ exports.verifyPayment = async (req, res, next) => {
     if (orderDoc) {
       orderDoc.addStatusHistory('payment_verified', 'Payment verified via Razorpay', null);
       await orderDoc.save();
+
+      await creditAffiliateCommissionForOrder(orderDoc._id);
     }
 
     res.json({

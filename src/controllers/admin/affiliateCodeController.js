@@ -1,6 +1,34 @@
-const { AffiliateCode } = require('../../models');
+const { AffiliateCode, AffiliateCommission, Order } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
+
+const normalizeDiscountRules = (rules = []) => {
+    if (!Array.isArray(rules)) return [];
+    return rules
+        .map((rule) => ({
+            minPurchaseAmount: Number(rule?.minPurchaseAmount || 0),
+            discountType: rule?.discountType === 'fixed' ? 'fixed' : 'percentage',
+            discountValue: Number(rule?.discountValue || 0),
+            maxDiscountAmount: rule?.maxDiscountAmount === null || rule?.maxDiscountAmount === undefined || rule?.maxDiscountAmount === ''
+                ? undefined
+                : Number(rule.maxDiscountAmount),
+        }))
+        .filter((rule) => rule.discountValue >= 0 && rule.minPurchaseAmount >= 0)
+        .sort((a, b) => a.minPurchaseAmount - b.minPurchaseAmount);
+};
+
+const applyPrimaryDiscountFields = (data) => {
+    const rules = normalizeDiscountRules(data.discountRules);
+    if (rules.length > 0) {
+        const firstRule = rules[0];
+        data.discountRules = rules;
+        data.discountType = firstRule.discountType;
+        data.discountValue = firstRule.discountValue;
+        return;
+    }
+
+    data.discountRules = [];
+};
 
 exports.getAffiliateCodes = async (req, res, next) => {
     try {
@@ -49,6 +77,7 @@ exports.getAffiliateCodeById = async (req, res, next) => {
 exports.createAffiliateCode = async (req, res, next) => {
     try {
         const codeData = { ...req.body };
+        applyPrimaryDiscountFields(codeData);
 
         if (codeData.startDate && codeData.endDate) {
             if (new Date(codeData.startDate) > new Date(codeData.endDate)) {
@@ -79,6 +108,9 @@ exports.updateAffiliateCode = async (req, res, next) => {
         }
 
         const updateData = { ...req.body };
+        if (Object.prototype.hasOwnProperty.call(updateData, 'discountRules')) {
+            applyPrimaryDiscountFields(updateData);
+        }
 
         if (updateData.startDate && updateData.endDate) {
             if (new Date(updateData.startDate) > new Date(updateData.endDate)) {
@@ -148,15 +180,80 @@ exports.getAffiliateCodeUsage = async (req, res, next) => {
             throw new NotFoundError('Affiliate code not found', 'AFFILIATE_CODE_NOT_FOUND');
         }
 
-        const { Order } = require('../../models');
         const usages = await Order.find({ affiliateCode: affiliateCode.code })
-            .select('orderNumber customerSnapshot total createdAt status')
+            .select('orderNumber customerSnapshot total createdAt status discount commissionAmount')
             .sort({ createdAt: -1 })
             .lean();
 
         res.json({
             success: true,
-            data: usages,
+            data: usages.map((usage) => ({
+                ...usage,
+                discount: usage.discount || 0,
+                commissionAmount: usage.commissionAmount || 0,
+                commissionStatus: usage.commissionAmount > 0 ? 'unpaid' : null,
+            })),
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getAffiliateCodeCommissions = async (req, res, next) => {
+    try {
+        const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+        const affiliateCode = await AffiliateCode.findById(req.params.id);
+        if (!affiliateCode) {
+            throw new NotFoundError('Affiliate code not found', 'AFFILIATE_CODE_NOT_FOUND');
+        }
+
+        const query = { affiliateCodeId: affiliateCode._id };
+        const [rows, total] = await Promise.all([
+            AffiliateCommission.find(query)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            AffiliateCommission.countDocuments(query),
+        ]);
+
+        res.json({
+            success: true,
+            ...formatPaginationResponse(rows, total, page, limit),
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getAffiliateCommissions = async (req, res, next) => {
+    try {
+        const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+        const { affiliateCode, status, search } = req.query;
+        const query = {};
+
+        if (affiliateCode) query.affiliateCode = affiliateCode.toString().trim().toUpperCase();
+        if (status) query.status = status;
+        if (search) {
+            query.$or = [
+                { affiliateCode: { $regex: search, $options: 'i' } },
+                { personNameSnapshot: { $regex: search, $options: 'i' } },
+                { orderNumber: { $regex: search, $options: 'i' } },
+            ];
+        }
+
+        const [rows, total] = await Promise.all([
+            AffiliateCommission.find(query)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            AffiliateCommission.countDocuments(query),
+        ]);
+
+        res.json({
+            success: true,
+            ...formatPaginationResponse(rows, total, page, limit),
         });
     } catch (error) {
         next(error);

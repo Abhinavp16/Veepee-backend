@@ -101,6 +101,8 @@ router.put('/affiliate-codes/:id', validate(adminValidation.updateAffiliateCode)
 router.delete('/affiliate-codes/:id', adminAffiliateController.deleteAffiliateCode);
 router.patch('/affiliate-codes/:id/toggle', adminAffiliateController.toggleAffiliateCodeStatus);
 router.get('/affiliate-codes/:id/usage', adminAffiliateController.getAffiliateCodeUsage);
+router.get('/affiliate-codes/:id/commissions', adminAffiliateController.getAffiliateCodeCommissions);
+router.get('/affiliate-commissions', adminAffiliateController.getAffiliateCommissions);
 
 // Reviews
 router.get('/reviews', adminReviewController.getAllReviews);

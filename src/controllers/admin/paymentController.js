@@ -3,6 +3,7 @@ const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { PAYMENT_STATUS, ORDER_STATUS } = require('../../utils/constants');
 const notificationService = require('../../services/notificationService');
+const { creditAffiliateCommissionForOrder } = require('../../services/affiliateCommissionService');
 
 exports.getPayments = async (req, res, next) => {
   try {
@@ -96,6 +97,8 @@ exports.verifyPayment = async (req, res, next) => {
 
       order.addStatusHistory(ORDER_STATUS.PROCESSING, 'Order auto-confirmed after payment verification', req.user._id);
       await order.save();
+
+      await creditAffiliateCommissionForOrder(order._id);
     }
 
     // Send push notification to customer

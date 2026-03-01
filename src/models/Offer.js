@@ -1,6 +1,29 @@
 const mongoose = require('mongoose');
 const { USER_ROLES } = require('../utils/constants');
 
+const discountRuleSchema = new mongoose.Schema({
+    minPurchaseAmount: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
+    },
+    discountType: {
+        type: String,
+        enum: ['percentage', 'fixed'],
+        default: 'percentage',
+    },
+    discountValue: {
+        type: Number,
+        required: true,
+        min: 0,
+    },
+    maxDiscountAmount: {
+        type: Number,
+        min: 0,
+    },
+}, { _id: false });
+
 const offerSchema = new mongoose.Schema({
     title: {
         type: String,
@@ -57,7 +80,11 @@ const offerSchema = new mongoose.Schema({
     usageCount: {
         type: Number,
         default: 0,
-    }
+    },
+    discountRules: {
+        type: [discountRuleSchema],
+        default: [],
+    },
 }, {
     timestamps: true,
 });

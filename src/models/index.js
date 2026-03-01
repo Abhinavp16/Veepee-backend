@@ -13,6 +13,7 @@ const DeviceToken = require('./DeviceToken');
 const Notification = require('./Notification');
 const Offer = require('./Offer');
 const AffiliateCode = require('./AffiliateCode');
+const AffiliateCommission = require('./AffiliateCommission');
 const Review = require('./Review');
 
 module.exports = {
@@ -31,5 +32,6 @@ module.exports = {
   Notification,
   Offer,
   AffiliateCode,
+  AffiliateCommission,
   Review,
 };

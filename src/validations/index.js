@@ -1,5 +1,12 @@
 const Joi = require('joi');
 
+const discountRuleSchema = Joi.object({
+  minPurchaseAmount: Joi.number().min(0).required(),
+  discountType: Joi.string().valid('percentage', 'fixed').required(),
+  discountValue: Joi.number().min(0).required(),
+  maxDiscountAmount: Joi.number().min(0).allow('', null),
+});
+
 const authValidation = {
   register: Joi.object({
     name: Joi.string().required().max(100),
@@ -148,8 +155,8 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
-    couponCode: Joi.string().uppercase().allow('', null),
-    affiliateCode: Joi.string().uppercase().allow('', null),
+    couponCode: Joi.string().trim().uppercase().allow('', null),
+    affiliateCode: Joi.string().trim().uppercase().allow('', null),
   }),
 
   previewCoupon: Joi.object({
@@ -168,8 +175,8 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
-    couponCode: Joi.string().uppercase().allow('', null),
-    affiliateCode: Joi.string().uppercase().allow('', null),
+    couponCode: Joi.string().trim().uppercase().allow('', null),
+    affiliateCode: Joi.string().trim().uppercase().allow('', null),
   }),
 };
 
@@ -316,6 +323,7 @@ const adminValidation = {
     description: Joi.string().allow('', null),
     discountType: Joi.string().valid('percentage', 'fixed').default('percentage'),
     discountValue: Joi.number().min(0).required(),
+    discountRules: Joi.array().items(discountRuleSchema).default([]),
     code: Joi.string().uppercase().allow('', null),
     targetGroup: Joi.string().valid('buyer', 'wholesaler', 'all').default('all'),
     startDate: Joi.date().iso().default(Date.now),
@@ -331,6 +339,7 @@ const adminValidation = {
     description: Joi.string().allow('', null),
     discountType: Joi.string().valid('percentage', 'fixed'),
     discountValue: Joi.number().min(0),
+    discountRules: Joi.array().items(discountRuleSchema),
     code: Joi.string().uppercase().allow('', null),
     targetGroup: Joi.string().valid('buyer', 'wholesaler', 'all'),
     startDate: Joi.date().iso(),
@@ -346,6 +355,7 @@ const adminValidation = {
     personName: Joi.string().required().max(100),
     discountType: Joi.string().valid('percentage', 'fixed').default('percentage'),
     discountValue: Joi.number().min(0).required(),
+    discountRules: Joi.array().items(discountRuleSchema).default([]),
     usageLimit: Joi.number().integer().min(0).default(0),
     startDate: Joi.date().iso().default(Date.now),
     endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
@@ -357,6 +367,7 @@ const adminValidation = {
     personName: Joi.string().max(100),
     discountType: Joi.string().valid('percentage', 'fixed'),
     discountValue: Joi.number().min(0),
+    discountRules: Joi.array().items(discountRuleSchema),
     usageLimit: Joi.number().integer().min(0),
     startDate: Joi.date().iso(),
     endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),

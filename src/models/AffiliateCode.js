@@ -1,5 +1,28 @@
 const mongoose = require('mongoose');
 
+const discountRuleSchema = new mongoose.Schema({
+    minPurchaseAmount: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
+    },
+    discountType: {
+        type: String,
+        enum: ['percentage', 'fixed'],
+        default: 'percentage',
+    },
+    discountValue: {
+        type: Number,
+        required: true,
+        min: 0,
+    },
+    maxDiscountAmount: {
+        type: Number,
+        min: 0,
+    },
+}, { _id: false });
+
 const affiliateCodeSchema = new mongoose.Schema({
     code: {
         type: String,
@@ -31,6 +54,16 @@ const affiliateCodeSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    totalDiscountGenerated: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    totalCommissionAccrued: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
     isActive: {
         type: Boolean,
         default: true,
@@ -41,7 +74,11 @@ const affiliateCodeSchema = new mongoose.Schema({
     },
     endDate: {
         type: Date,
-    }
+    },
+    discountRules: {
+        type: [discountRuleSchema],
+        default: [],
+    },
 }, {
     timestamps: true,
 });

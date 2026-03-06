@@ -1,5 +1,8 @@
 const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
+const sharp = require('sharp');
 const { User, RefreshToken } = require('../models');
+const { getStorage } = require('../config/firebase');
 const { UnauthorizedError, ConflictError, BadRequestError } = require('../utils/errors');
 const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 const { sanitizeUser } = require('../utils/helpers');
@@ -435,6 +438,64 @@ exports.updateProfile = async (req, res, next) => {
       success: true,
       message: 'Profile updated successfully',
       data: sanitizeUser(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.uploadProfileAvatar = async (req, res, next) => {
+  try {
+    const bucket = getStorage();
+    if (!bucket) {
+      return res.status(503).json({
+        success: false,
+        message: 'Image upload service is unavailable',
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No image file uploaded',
+      });
+    }
+
+    const webpBuffer = await sharp(req.file.buffer).webp({ quality: 80 }).toBuffer();
+    const filename = `avatars/${req.user._id}/${uuidv4()}.webp`;
+    const fileUpload = bucket.file(filename);
+
+    await new Promise((resolve, reject) => {
+      const blobStream = fileUpload.createWriteStream({
+        metadata: {
+          contentType: 'image/webp',
+          metadata: {
+            originalName: req.file.originalname,
+            uploadedBy: req.user._id.toString(),
+            uploadedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      blobStream.on('error', reject);
+      blobStream.on('finish', resolve);
+      blobStream.end(webpBuffer);
+    });
+
+    await fileUpload.makePublic();
+    const avatarUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`;
+
+    const user = req.user;
+    user.avatar = avatarUrl;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Avatar updated successfully',
+      data: {
+        avatarUrl,
+        user: sanitizeUser(user),
+      },
     });
   } catch (error) {
     next(error);

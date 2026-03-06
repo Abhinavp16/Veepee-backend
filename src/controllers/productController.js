@@ -96,17 +96,16 @@ exports.getProductBySlug = async (req, res, next) => {
     const userRole = req.user?.role || 'guest';
     const param = req.params.slug;
 
-    // Try finding by slug first, then by ID if it looks like a MongoDB ObjectId
+    // Try public lookup by active slug first.
     let product = await Product.findOne({
       slug: param,
       status: PRODUCT_STATUS.ACTIVE,
     }).lean();
 
+    // If opened from cart/order history, ID may point to a non-active product.
+    // Allow ID lookup regardless of status so users can still view item details.
     if (!product && param.match(/^[0-9a-fA-F]{24}$/)) {
-      product = await Product.findOne({
-        _id: param,
-        status: PRODUCT_STATUS.ACTIVE,
-      }).lean();
+      product = await Product.findById(param).lean();
     }
 
     if (!product) {

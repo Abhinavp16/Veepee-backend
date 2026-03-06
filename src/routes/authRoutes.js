@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect } = require('../middlewares/auth');
+const { uploadAvatar } = require('../config/cloudinary');
 const validate = require('../middlewares/validate');
 const { authValidation } = require('../validations');
 
@@ -18,6 +19,7 @@ router.post('/refresh-token', validate(authValidation.refreshToken), authControl
 router.post('/logout', protect, authController.logout);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
+router.post('/profile/avatar', protect, uploadAvatar.single('avatar'), authController.uploadProfileAvatar);
 router.post('/fcm-token', protect, validate(authValidation.fcmToken), authController.registerFcmToken);
 router.post('/convert-to-wholesaler', protect, validate(authValidation.convertWholesaler), authController.convertToWholesaler);
 

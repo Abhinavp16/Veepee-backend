@@ -407,7 +407,9 @@ exports.createOrderFromCart = async (req, res, next) => {
       customerSnapshot: {
         name: req.user.name,
         email: req.user.email,
-        phone: req.user.phone,
+        // Some legacy/social-auth users may not have profile phone set.
+        // Fallback to checkout shipping phone to satisfy required snapshot field.
+        phone: req.user.phone || shippingAddress?.phone,
       },
       orderType: ORDER_TYPES.RETAIL,
       items: orderItems,
@@ -524,7 +526,8 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       customerSnapshot: {
         name: req.user.name,
         email: req.user.email,
-        phone: req.user.phone,
+        // Keep consistent fallback behavior with cart checkout.
+        phone: req.user.phone || shippingAddress?.phone,
         businessName: req.user.businessInfo?.businessName,
       },
       orderType: ORDER_TYPES.WHOLESALE,

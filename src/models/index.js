@@ -15,6 +15,7 @@ const Offer = require('./Offer');
 const AffiliateCode = require('./AffiliateCode');
 const AffiliateCommission = require('./AffiliateCommission');
 const Review = require('./Review');
+const WebsiteSettings = require('./WebsiteSettings');
 
 module.exports = {
   User,
@@ -34,4 +35,5 @@ module.exports = {
   AffiliateCode,
   AffiliateCommission,
   Review,
+  WebsiteSettings,
 };

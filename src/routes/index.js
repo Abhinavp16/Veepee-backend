@@ -53,6 +53,41 @@ router.get('/settings/banners', async (req, res, next) => {
   }
 });
 
+// Public endpoint for website products page content
+router.get('/settings/website-content', async (req, res, next) => {
+  try {
+    const { WebsiteSettings } = require('../models');
+    const settings = await WebsiteSettings.getSettings();
+
+    const productCategories = (settings.productCategories || [])
+      .filter((item) => item.isActive !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const featuredProducts = (settings.featuredProducts || [])
+      .filter((item) => item.isActive !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const heroCards = (settings.heroCards || [])
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const categoriesSection = settings.categoriesSection || {};
+    const featuredSection = settings.featuredSection || {};
+
+    res.json({
+      success: true,
+      data: {
+        productCategories,
+        featuredProducts,
+        heroCards,
+        categoriesSection,
+        featuredSection,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.use('/auth', authRoutes);
 router.use('/products', productRoutes);
 router.use('/cart', cartRoutes);

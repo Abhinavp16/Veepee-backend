@@ -318,6 +318,43 @@ const adminValidation = {
     }),
   }),
 
+  updateWebsiteSettings: Joi.object({
+    heroCards: Joi.array().items(Joi.object({
+      image: Joi.string().allow('', null),
+      order: Joi.number().integer(),
+    })).length(6),
+    productCategories: Joi.array().items(Joi.object({
+      name: Joi.string().required(),
+      description: Joi.string().allow('', null),
+      image: Joi.string().allow('', null),
+      products: Joi.array().items(Joi.string().allow('', null)),
+      isActive: Joi.boolean(),
+      order: Joi.number().integer(),
+    })),
+    featuredProducts: Joi.array().items(Joi.object({
+      name: Joi.string().required(),
+      price: Joi.string().allow('', null),
+      image: Joi.string().allow('', null),
+      badge: Joi.string().allow('', null),
+      specs: Joi.array().items(Joi.string().allow('', null)),
+      isActive: Joi.boolean(),
+      order: Joi.number().integer(),
+    })),
+    categoriesSection: Joi.object({
+      eyebrow: Joi.string().allow('', null),
+      title: Joi.string().allow('', null),
+      description: Joi.string().allow('', null),
+      buttonText: Joi.string().allow('', null),
+    }),
+    featuredSection: Joi.object({
+      eyebrow: Joi.string().allow('', null),
+      title: Joi.string().allow('', null),
+      description: Joi.string().allow('', null),
+      sideText: Joi.string().allow('', null),
+      buttonText: Joi.string().allow('', null),
+    }),
+  }),
+
   createOffer: Joi.object({
     title: Joi.string().required().max(200),
     description: Joi.string().allow('', null),

@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const mongoose = require('mongoose');
 const { getFirebaseApp, getMessaging, getStorage } = require('../config/firebase');
+const connectDB = require('../config/database');
+const { getDatabaseHealth } = require('../config/database');
 
 const authRoutes = require('./authRoutes');
 const productRoutes = require('./productRoutes');
@@ -18,31 +19,18 @@ const razorpayRoutes = require('./razorpayRoutes');
 
 const apiStartTime = new Date();
 
-const getMongoStateName = (readyState) => {
-  switch (readyState) {
-    case 0:
-      return 'disconnected';
-    case 1:
-      return 'connected';
-    case 2:
-      return 'connecting';
-    case 3:
-      return 'disconnecting';
-    default:
-      return 'unknown';
-  }
-};
-
 const getMongoHealth = async () => {
-  const state = getMongoStateName(mongoose.connection.readyState);
+  const current = getDatabaseHealth();
   const result = {
     name: 'mongodb',
     configured: Boolean(process.env.MONGODB_URI),
-    state,
-    host: mongoose.connection.host || null,
-    database: mongoose.connection.name || null,
+    state: current.state,
+    host: current.host,
+    database: current.database,
     ok: false,
-    details: null,
+    details: current.lastError || null,
+    lastConnectedAt: current.lastConnectedAt,
+    lastDisconnectedAt: current.lastDisconnectedAt,
   };
 
   if (!result.configured) {
@@ -50,14 +38,39 @@ const getMongoHealth = async () => {
     return result;
   }
 
-  if (mongoose.connection.readyState !== 1) {
-    result.details = `MongoDB not connected (state: ${state})`;
-    return result;
+  if (current.state !== 'connected') {
+    try {
+      await connectDB();
+    } catch (error) {
+      const afterFailure = getDatabaseHealth();
+      result.state = afterFailure.state;
+      result.host = afterFailure.host;
+      result.database = afterFailure.database;
+      result.lastConnectedAt = afterFailure.lastConnectedAt;
+      result.lastDisconnectedAt = afterFailure.lastDisconnectedAt;
+      result.details = afterFailure.lastError || error.message;
+      return result;
+    }
   }
 
   try {
+    const afterConnect = getDatabaseHealth();
+    if (afterConnect.state !== 'connected') {
+      result.state = afterConnect.state;
+      result.host = afterConnect.host;
+      result.database = afterConnect.database;
+      result.lastConnectedAt = afterConnect.lastConnectedAt;
+      result.lastDisconnectedAt = afterConnect.lastDisconnectedAt;
+      result.details = afterConnect.lastError || `MongoDB not connected (state: ${afterConnect.state})`;
+      return result;
+    }
+
+    const mongoose = require('mongoose');
     const ping = await mongoose.connection.db.admin().command({ ping: 1 });
     result.ok = ping?.ok === 1;
+    result.state = 'connected';
+    result.host = mongoose.connection.host || result.host;
+    result.database = mongoose.connection.name || result.database;
     result.details = result.ok ? 'MongoDB ping successful' : 'MongoDB ping failed';
     return result;
   } catch (error) {

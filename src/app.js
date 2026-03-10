@@ -5,6 +5,8 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
 const routes = require('./routes');
+const connectDB = require('./config/database');
+const { initializeFirebase } = require('./config/firebase');
 const errorHandler = require('./middlewares/errorHandler');
 const { NotFoundError } = require('./utils/errors');
 
@@ -53,6 +55,22 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV
   });
+});
+
+// Ensure dependencies are initialized for API routes in hosted/serverless environments.
+app.use('/api/v1', async (req, res, next) => {
+  try {
+    // Keep health routes lightweight and self-diagnosing.
+    if (req.path.startsWith('/health')) {
+      return next();
+    }
+
+    await connectDB();
+    initializeFirebase();
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 });
 
 // API routes

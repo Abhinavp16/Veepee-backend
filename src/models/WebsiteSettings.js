@@ -38,7 +38,6 @@ const defaultHeroCards = [
   '/images/Banner/3.jpg',
   '/images/Banner/4.jpg',
   '/images/Banner/5.jpg',
-  '/images/Banner/1.jpg',
 ].map((image, order) => ({ image, order }));
 
 const websiteSettingsSchema = new mongoose.Schema({
@@ -104,7 +103,7 @@ websiteSettingsSchema.statics.getSettings = async function () {
     });
   }
 
-  if (!Array.isArray(settings.heroCards) || settings.heroCards.length !== 6) {
+  if (!Array.isArray(settings.heroCards) || settings.heroCards.length !== 5) {
     settings.heroCards = defaultHeroCards;
     await settings.save();
   }

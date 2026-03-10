@@ -26,10 +26,10 @@ exports.updateWebsiteSettings = async (req, res, next) => {
       }
     }
 
-    if (!Array.isArray(settings.heroCards) || settings.heroCards.length !== 6) {
+    if (!Array.isArray(settings.heroCards) || settings.heroCards.length !== 5) {
       return res.status(400).json({
         success: false,
-        message: 'heroCards must contain exactly 6 items',
+        message: 'heroCards must contain exactly 5 items',
       });
     }
 

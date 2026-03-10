@@ -322,7 +322,7 @@ const adminValidation = {
     heroCards: Joi.array().items(Joi.object({
       image: Joi.string().allow('', null),
       order: Joi.number().integer(),
-    })).length(6),
+    })).length(5),
     productCategories: Joi.array().items(Joi.object({
       name: Joi.string().required(),
       description: Joi.string().allow('', null),

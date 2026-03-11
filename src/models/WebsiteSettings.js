@@ -5,6 +5,7 @@ const websiteCategorySchema = new mongoose.Schema({
   description: String,
   image: String,
   products: [{ type: String }],
+  productDetails: { type: [mongoose.Schema.Types.Mixed], default: [] },
   isActive: { type: Boolean, default: true },
   order: { type: Number, default: 0 },
 }, { _id: false });

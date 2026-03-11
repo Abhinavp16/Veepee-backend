@@ -16,32 +16,43 @@ const app = express();
 app.use(helmet());
 
 // CORS configuration
-const allowedOrigins = (
-  process.env.CORS_ORIGIN ||
-  [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-  ].join(",")
-)
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const normalizeOrigins = (value) =>
+  (value || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Allow server-to-server and curl requests without Origin header.
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+const defaultOrigins = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+  "https://veepee-admin.vercel.app",
+];
+
+const allowedOrigins = [
+  ...new Set([
+    ...normalizeOrigins(process.env.CORS_ORIGIN),
+    ...normalizeOrigins(process.env.ADMIN_PANEL_URL),
+    ...normalizeOrigins(process.env.FRONTEND_URL),
+    ...defaultOrigins,
+  ]),
+];
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow server-to-server and curl requests without Origin header.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({

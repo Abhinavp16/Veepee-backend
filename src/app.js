@@ -39,11 +39,21 @@ const allowedOrigins = [
   ]),
 ];
 
+const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+const vercelPreviewPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
+
+const isAllowedOrigin = (origin) => {
+  if (allowedOrigins.includes(origin)) return true;
+  if (localhostOriginPattern.test(origin)) return true;
+  if (vercelPreviewPattern.test(origin)) return true;
+  return false;
+};
+
 const corsOptions = {
   origin(origin, callback) {
     // Allow server-to-server and curl requests without Origin header.
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,

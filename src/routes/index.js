@@ -1,8 +1,10 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { getFirebaseApp, getMessaging, getStorage } = require('../config/firebase');
 const connectDB = require('../config/database');
 const { getDatabaseHealth } = require('../config/database');
+const { PRODUCT_STATUS } = require('../utils/constants');
 
 const authRoutes = require('./authRoutes');
 const productRoutes = require('./productRoutes');
@@ -16,6 +18,70 @@ const categoryRoutes = require('./categoryRoutes');
 const uploadRoutes = require('./uploadRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const razorpayRoutes = require('./razorpayRoutes');
+
+const normalizeNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const getPrimaryWebsiteProductImage = (product = {}) => {
+  const images = Array.isArray(product.images) ? [...product.images] : [];
+  images.sort((a, b) => (a?.order || 0) - (b?.order || 0));
+  const primary = images.find((image) => image?.isPrimary) || images[0];
+  return primary?.url || '';
+};
+
+const mapLiveProductToWebsiteProduct = (product, fallback = {}, order = 0) => {
+  const images = Array.isArray(product?.images)
+    ? product.images
+        .map((image) => String(image?.url || '').trim())
+        .filter(Boolean)
+    : [];
+  const image = getPrimaryWebsiteProductImage(product) || String(fallback?.image || '').trim();
+
+  return {
+    productId: String(product?._id || fallback?.productId || ''),
+    name: String(product?.name || fallback?.name || '').trim(),
+    slug: String(product?.slug || fallback?.slug || '').trim(),
+    category: String(product?.category || fallback?.category || '').trim(),
+    shortDescription: String(product?.shortDescription || fallback?.shortDescription || '').trim(),
+    description: String(product?.description || fallback?.description || '').trim(),
+    sku: String(product?.sku || fallback?.sku || '').trim(),
+    mrp: normalizeNumber(product?.mrp ?? fallback?.mrp),
+    retailPrice: normalizeNumber(product?.retailPrice ?? fallback?.retailPrice),
+    wholesalePrice: normalizeNumber(product?.wholesalePrice ?? fallback?.wholesalePrice),
+    stock: normalizeNumber(product?.stock ?? fallback?.stock),
+    status: String(product?.status || fallback?.status || '').trim(),
+    image,
+    images: images.length > 0 ? images : (image ? [image] : []),
+    order,
+  };
+};
+
+const mapStoredWebsiteProduct = (product = {}, order = 0) => {
+  const images = Array.isArray(product?.images)
+    ? product.images.map((image) => String(image || '').trim()).filter(Boolean)
+    : [];
+  const image = String(product?.image || images[0] || '').trim();
+
+  return {
+    productId: String(product?.productId || '').trim(),
+    name: String(product?.name || '').trim(),
+    slug: String(product?.slug || '').trim(),
+    category: String(product?.category || '').trim(),
+    shortDescription: String(product?.shortDescription || '').trim(),
+    description: String(product?.description || '').trim(),
+    sku: String(product?.sku || '').trim(),
+    mrp: normalizeNumber(product?.mrp),
+    retailPrice: normalizeNumber(product?.retailPrice),
+    wholesalePrice: normalizeNumber(product?.wholesalePrice),
+    stock: normalizeNumber(product?.stock),
+    status: String(product?.status || '').trim(),
+    image,
+    images: images.length > 0 ? images : (image ? [image] : []),
+    order,
+  };
+};
 
 const apiStartTime = new Date();
 
@@ -210,12 +276,66 @@ router.get('/settings/banners', async (req, res, next) => {
 // Public endpoint for website products page content
 router.get('/settings/website-content', async (req, res, next) => {
   try {
-    const { WebsiteSettings } = require('../models');
+    const { Product, WebsiteSettings } = require('../models');
     const settings = await WebsiteSettings.getSettings();
 
-    const productCategories = (settings.productCategories || [])
+    const rawProductCategories = (settings.productCategories || [])
       .filter((item) => item.isActive !== false)
       .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const linkedProductIds = [...new Set(
+      rawProductCategories.flatMap((category) => (
+        Array.isArray(category?.productDetails)
+          ? category.productDetails
+              .map((detail) => String(detail?.productId || '').trim())
+              .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          : []
+      ))
+    )];
+
+    const linkedProducts = linkedProductIds.length > 0
+      ? await Product.find({
+          _id: { $in: linkedProductIds },
+          status: PRODUCT_STATUS.ACTIVE,
+        })
+          .select('name slug category shortDescription description sku mrp retailPrice wholesalePrice stock status images')
+          .lean()
+      : [];
+    const linkedProductsById = new Map(linkedProducts.map((product) => [String(product._id), product]));
+
+    const productCategories = rawProductCategories.map((category, categoryIndex) => {
+      const baseCategory = typeof category?.toObject === 'function' ? category.toObject() : { ...category };
+      const savedDetails = Array.isArray(baseCategory.productDetails) ? baseCategory.productDetails : [];
+      const savedNames = Array.isArray(baseCategory.products)
+        ? baseCategory.products.map((name) => String(name || '').trim()).filter(Boolean)
+        : [];
+
+      const productDetails = savedDetails
+        .sort((a, b) => (a?.order || 0) - (b?.order || 0))
+        .map((detail, detailIndex) => {
+          const productId = String(detail?.productId || '').trim();
+          if (productId) {
+            const liveProduct = linkedProductsById.get(productId);
+            if (!liveProduct) {
+              return null;
+            }
+            return mapLiveProductToWebsiteProduct(liveProduct, detail, detailIndex);
+          }
+
+          const storedProduct = mapStoredWebsiteProduct(detail, detailIndex);
+          return storedProduct.name ? storedProduct : null;
+        })
+        .filter(Boolean);
+
+      return {
+        ...baseCategory,
+        products: productDetails.length > 0
+          ? productDetails.map((product) => product.name)
+          : savedNames,
+        productDetails,
+        order: Number.isFinite(baseCategory.order) ? baseCategory.order : categoryIndex,
+      };
+    });
 
     const featuredProducts = (settings.featuredProducts || [])
       .filter((item) => item.isActive !== false)

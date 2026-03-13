@@ -64,7 +64,7 @@ const websiteSettingsSchema = new mongoose.Schema({
       eyebrow: 'PRODUCT CATEGORIES',
       title: 'The Heart of Modern Farming',
       description: 'Our diverse range of agriculture and industrial machines stands at the core of modern farming practices. Each piece of equipment is designed with utmost precision.',
-      buttonText: 'View all product',
+      buttonText: 'View Products',
     },
   },
   featuredSection: {
@@ -93,7 +93,7 @@ websiteSettingsSchema.statics.getSettings = async function () {
         eyebrow: 'PRODUCT CATEGORIES',
         title: 'The Heart of Modern Farming',
         description: 'Our diverse range of agriculture and industrial machines stands at the core of modern farming practices. Each piece of equipment is designed with utmost precision.',
-        buttonText: 'View all product',
+        buttonText: 'View Products',
       },
       featuredSection: {
         eyebrow: 'PRECISION ENGINEERING',

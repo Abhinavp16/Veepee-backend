@@ -98,6 +98,17 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Root landing route for hosted environments that probe "/"
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'AgriMart API is running',
+    docs: '/api/v1',
+    health: '/health',
+    apiHealth: '/api/v1/health',
+  });
+});
+
 // Ensure dependencies are initialized for API routes in hosted/serverless environments.
 app.use('/api/v1', async (req, res, next) => {
   try {

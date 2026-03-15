@@ -3,6 +3,22 @@ const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
 
+// Helper to get price based on user role
+const getPriceForUser = (product, userRole) => {
+  if (userRole === 'wholesaler') {
+    return {
+      price: product.wholesalePrice,
+      retailPrice: product.retailPrice,
+      wholesalePrice: product.wholesalePrice,
+    };
+  }
+  // For buyers - show retail price
+  return {
+    price: product.retailPrice,
+    retailPrice: product.retailPrice,
+  };
+};
+
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
 
@@ -324,6 +340,7 @@ exports.getMyOrders = async (req, res, next) => {
 
 exports.createOrderFromCart = async (req, res, next) => {
   try {
+    const userRole = req.user?.role || 'guest';
     const { shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
     const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
 
@@ -361,7 +378,11 @@ exports.createOrderFromCart = async (req, res, next) => {
         continue;
       }
 
-      const itemTotal = product.retailPrice * item.quantity;
+      // Get role-based pricing
+      const pricing = getPriceForUser(product, userRole);
+      const pricePerUnit = pricing.price;
+      const itemTotal = pricePerUnit * item.quantity;
+
       orderItems.push({
         productId: product._id,
         productSnapshot: {
@@ -370,7 +391,7 @@ exports.createOrderFromCart = async (req, res, next) => {
           image: product.primaryImage,
         },
         quantity: item.quantity,
-        pricePerUnit: product.retailPrice,
+        pricePerUnit: pricePerUnit,
         totalPrice: itemTotal,
       });
       subtotal += itemTotal;

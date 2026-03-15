@@ -52,7 +52,7 @@ exports.getProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name nameHindi slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax')
+        .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax')
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -69,6 +69,7 @@ exports.getProducts = async (req, res, next) => {
         slug: p.slug,
         shortDescription: p.shortDescription,
         category: p.category,
+        brand: p.brand || '',
         ...pricing,
         stock: p.stock,
         inStock: p.stock > 0,

@@ -33,6 +33,10 @@ const productSchema = new mongoose.Schema({
     required: [true, 'Category is required'],
     index: true,
   },
+  brand: {
+    type: String,
+    default: '',
+  },
   subCategory: {
     type: String,
     default: null,

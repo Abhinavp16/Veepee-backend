@@ -1,8 +1,25 @@
 const { Cart, Product } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 
+// Helper to get price based on user role
+const getPriceForUser = (product, userRole) => {
+  if (userRole === 'wholesaler') {
+    return {
+      price: product.wholesalePrice,
+      retailPrice: product.retailPrice,
+      wholesalePrice: product.wholesalePrice,
+    };
+  }
+  // For buyers - show retail price
+  return {
+    price: product.retailPrice,
+    retailPrice: product.retailPrice,
+  };
+};
+
 exports.getCart = async (req, res, next) => {
   try {
+    const userRole = req.user?.role || 'guest';
     let cart = await Cart.findOne({ userId: req.user._id });
 
     if (!cart) {
@@ -23,21 +40,26 @@ exports.getCart = async (req, res, next) => {
       const product = productMap[item.productId.toString()];
       if (!product) return null;
 
+      const pricing = getPriceForUser(product, userRole);
+      const currentPrice = pricing.price;
+
       return {
         productId: item.productId,
         product: {
           name: product.name,
           nameHindi: product.nameHindi,
           slug: product.slug,
-          price: product.retailPrice,
+          price: pricing.price,
+          retailPrice: pricing.retailPrice,
+          wholesalePrice: pricing.wholesalePrice,
           stock: product.stock,
           image: product.images?.find(img => img.isPrimary)?.url || product.images?.[0]?.url,
         },
         quantity: item.quantity,
         priceAtAdd: item.priceAtAdd,
-        currentPrice: product.retailPrice,
-        priceChanged: item.priceAtAdd !== product.retailPrice,
-        itemTotal: item.quantity * product.retailPrice,
+        currentPrice: currentPrice,
+        priceChanged: item.priceAtAdd !== currentPrice,
+        itemTotal: item.quantity * currentPrice,
       };
     }).filter(Boolean);
 
@@ -57,7 +79,7 @@ exports.getCart = async (req, res, next) => {
   }
 };
 
-const populateCartItems = async (cart) => {
+const populateCartItems = async (cart, userRole = 'guest') => {
   const productIds = cart.items.map(item => item.productId);
   const products = await Product.find({ _id: { $in: productIds } })
     .select('name nameHindi slug retailPrice wholesalePrice stock images')
@@ -71,21 +93,27 @@ const populateCartItems = async (cart) => {
   const items = cart.items.map(item => {
     const product = productMap[item.productId.toString()];
     if (!product) return null;
+
+    const pricing = getPriceForUser(product, userRole);
+    const currentPrice = pricing.price;
+
     return {
       productId: item.productId,
       product: {
         name: product.name,
         nameHindi: product.nameHindi,
         slug: product.slug,
-        price: product.retailPrice,
+        price: pricing.price,
+        retailPrice: pricing.retailPrice,
+        wholesalePrice: pricing.wholesalePrice,
         stock: product.stock,
         image: product.images?.find(img => img.isPrimary)?.url || product.images?.[0]?.url,
       },
       quantity: item.quantity,
       priceAtAdd: item.priceAtAdd,
-      currentPrice: product.retailPrice,
-      priceChanged: item.priceAtAdd !== product.retailPrice,
-      itemTotal: item.quantity * product.retailPrice,
+      currentPrice: currentPrice,
+      priceChanged: item.priceAtAdd !== currentPrice,
+      itemTotal: item.quantity * currentPrice,
     };
   }).filter(Boolean);
 
@@ -96,6 +124,7 @@ const populateCartItems = async (cart) => {
 
 exports.addItem = async (req, res, next) => {
   try {
+    const userRole = req.user?.role || 'guest';
     const { productId, quantity } = req.body;
 
     const product = await Product.findById(productId);
@@ -107,15 +136,18 @@ exports.addItem = async (req, res, next) => {
       throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
     }
 
+    const pricing = getPriceForUser(product, userRole);
+    const priceToUse = pricing.price;
+
     let cart = await Cart.findOne({ userId: req.user._id });
     if (!cart) {
       cart = new Cart({ userId: req.user._id, items: [] });
     }
 
-    cart.addItem(productId, quantity, product.retailPrice);
+    cart.addItem(productId, quantity, priceToUse);
     await cart.save();
 
-    const data = await populateCartItems(cart);
+    const data = await populateCartItems(cart, userRole);
     res.json({
       success: true,
       message: 'Item added to cart',
@@ -128,6 +160,7 @@ exports.addItem = async (req, res, next) => {
 
 exports.updateItemQuantity = async (req, res, next) => {
   try {
+    const userRole = req.user?.role || 'guest';
     const { productId } = req.params;
     const { quantity } = req.body;
 
@@ -148,7 +181,7 @@ exports.updateItemQuantity = async (req, res, next) => {
     cart.updateItemQuantity(productId, quantity);
     await cart.save();
 
-    const data = await populateCartItems(cart);
+    const data = await populateCartItems(cart, userRole);
     res.json({
       success: true,
       message: 'Cart updated',
@@ -161,6 +194,7 @@ exports.updateItemQuantity = async (req, res, next) => {
 
 exports.removeItem = async (req, res, next) => {
   try {
+    const userRole = req.user?.role || 'guest';
     const { productId } = req.params;
 
     const cart = await Cart.findOne({ userId: req.user._id });
@@ -171,7 +205,7 @@ exports.removeItem = async (req, res, next) => {
     cart.removeItem(productId);
     await cart.save();
 
-    const data = await populateCartItems(cart);
+    const data = await populateCartItems(cart, userRole);
     res.json({
       success: true,
       message: 'Item removed from cart',

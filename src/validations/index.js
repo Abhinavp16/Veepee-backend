@@ -354,6 +354,7 @@ const adminValidation = {
       image: Joi.string().allow('', null),
       badge: Joi.string().allow('', null),
       specs: Joi.array().items(Joi.string().allow('', null)),
+      shortDescription: Joi.string().allow('', null),
       isActive: Joi.boolean(),
       order: Joi.number().integer(),
     })),

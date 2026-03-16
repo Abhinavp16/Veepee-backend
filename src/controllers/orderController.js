@@ -421,7 +421,8 @@ exports.createOrderFromCart = async (req, res, next) => {
       subtotal,
       userRole: req.user.role,
     });
-    const total = Math.max(subtotal - discount, 0);
+    const deliveryFee = subtotal > 0 ? 50 : 0;
+    const total = Math.max(subtotal + deliveryFee - discount, 0);
 
     const order = await Order.create({
       userId: req.user._id,
@@ -435,6 +436,7 @@ exports.createOrderFromCart = async (req, res, next) => {
       orderType: ORDER_TYPES.RETAIL,
       items: orderItems,
       subtotal,
+      deliveryFee,
       discount,
       discountSource,
       affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
@@ -487,6 +489,8 @@ exports.createOrderFromCart = async (req, res, next) => {
       data: {
         orderId: order._id,
         orderNumber: order.orderNumber,
+        subtotal: order.subtotal,
+        deliveryFee: order.deliveryFee,
         discount: order.discount,
         total: order.total,
         status: order.status,

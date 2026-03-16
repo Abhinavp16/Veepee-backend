@@ -167,6 +167,7 @@ const orderValidation = {
 
   previewCoupon: Joi.object({
     couponCode: Joi.string().trim().uppercase().required(),
+    subtotal: Joi.number().min(0),
   }),
 
   createFromNegotiation: Joi.object({

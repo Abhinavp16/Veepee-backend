@@ -238,8 +238,23 @@ const getCurrentCartPricing = async (userId) => {
 
 exports.previewCouponForCart = async (req, res, next) => {
   try {
-    const { couponCode } = req.body;
-    const { subtotal, itemCount } = await getCurrentCartPricing(req.user._id);
+    const { couponCode, subtotal: requestedSubtotal } = req.body;
+
+    // If subtotal is provided in request (Buy Now flow), use it; otherwise get from cart
+    let subtotal = 0;
+    let itemCount = 0;
+
+    if (requestedSubtotal !== undefined && requestedSubtotal !== null) {
+      // Buy Now flow - use provided subtotal
+      subtotal = parseFloat(requestedSubtotal);
+      itemCount = 1;
+    } else {
+      // Cart flow - get from cart
+      const cartPricing = await getCurrentCartPricing(req.user._id);
+      subtotal = cartPricing.subtotal;
+      itemCount = cartPricing.itemCount;
+    }
+
     const {
       discountSource,
       offerCode,

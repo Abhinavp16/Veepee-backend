@@ -16,6 +16,7 @@ const websiteFeaturedProductSchema = new mongoose.Schema({
   image: String,
   badge: String,
   specs: [{ type: String }],
+  shortDescription: String,
   isActive: { type: Boolean, default: true },
   order: { type: Number, default: 0 },
 }, { _id: false });

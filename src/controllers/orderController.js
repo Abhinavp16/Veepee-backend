@@ -341,27 +341,41 @@ exports.getMyOrders = async (req, res, next) => {
 exports.createOrderFromCart = async (req, res, next) => {
   try {
     const userRole = req.user?.role || 'guest';
-    const { shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
+    const { items, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
     const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
 
-    const cart = await Cart.findOne({ userId: req.user._id });
-    if (!cart || cart.items.length === 0) {
-      throw new BadRequestError('Cart is empty', 'CART_EMPTY');
+    // Check if this is a Buy Now request (items provided directly) or cart-based
+    let orderItems = [];
+    let subtotal = 0;
+    let productIds = [];
+
+    if (items && Array.isArray(items) && items.length > 0) {
+      // Buy Now flow - use items from request body
+      productIds = items.map(item => item.productId);
+    } else {
+      // Cart flow - get items from cart
+      const cart = await Cart.findOne({ userId: req.user._id });
+      if (!cart || cart.items.length === 0) {
+        throw new BadRequestError('Cart is empty', 'CART_EMPTY');
+      }
+      productIds = cart.items.map(item => item.productId);
     }
 
-    const productIds = cart.items.map(item => item.productId);
     const products = await Product.find({ _id: { $in: productIds } });
     const productMap = products.reduce((acc, p) => {
       acc[p._id.toString()] = p;
       return acc;
     }, {});
 
+    // Get items to process (from request or cart)
+    const itemsToProcess = (items && Array.isArray(items) && items.length > 0)
+      ? items
+      : cart.items;
+
     // Pre-check: collect all stock issues before creating order
     const stockIssues = [];
-    const orderItems = [];
-    let subtotal = 0;
 
-    for (const item of cart.items) {
+    for (const item of itemsToProcess) {
       const product = productMap[item.productId.toString()];
       if (!product) continue;
 
@@ -470,9 +484,14 @@ exports.createOrderFromCart = async (req, res, next) => {
       });
     }
 
-    // Clear cart
-    cart.items = [];
-    await cart.save();
+    // Clear cart only for cart-based orders, not for Buy Now
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      // This was a cart-based order, clear the cart
+      if (cart) {
+        cart.items = [];
+        await cart.save();
+      }
+    }
 
     // Create payment record
     const settings = await Settings.getSettings();

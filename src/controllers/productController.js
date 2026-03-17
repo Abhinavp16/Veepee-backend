@@ -31,6 +31,8 @@ exports.getProducts = async (req, res, next) => {
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
     const userRole = req.user?.role || 'guest';
 
+    console.log('getProducts request - category:', category, 'brand:', brand);
+
     const query = { status: PRODUCT_STATUS.ACTIVE };
 
     // Price filter based on user role
@@ -38,6 +40,8 @@ exports.getProducts = async (req, res, next) => {
     if (category) query.category = { $regex: new RegExp(category, 'i') };
     if (brand) query.brand = { $regex: new RegExp(brand, 'i') };
     if (minPrice) query[priceField] = { ...query[priceField], $gte: Number(minPrice) };
+
+    console.log('getProducts final query:', JSON.stringify(query));
     if (maxPrice) query[priceField] = { ...query[priceField], $lte: Number(maxPrice) };
     if (inStock === 'true') query.stock = { $gt: 0 };
     if (featured === 'true') query.isFeatured = true;
@@ -219,6 +223,8 @@ exports.searchProducts = async (req, res, next) => {
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
     const userRole = req.user?.role || 'guest';
 
+    console.log('Search request - q:', q, 'category:', category, 'brand:', brand);
+
     // Build base query
     const query = { status: PRODUCT_STATUS.ACTIVE };
 
@@ -243,6 +249,8 @@ exports.searchProducts = async (req, res, next) => {
     // Apply optional filters (case-insensitive)
     if (category) query.category = { $regex: new RegExp(category, 'i') };
     if (brand) query.brand = { $regex: new RegExp(brand, 'i') };
+
+    console.log('Final search query:', JSON.stringify(query));
 
     const [products, total] = await Promise.all([
       Product.find(query)

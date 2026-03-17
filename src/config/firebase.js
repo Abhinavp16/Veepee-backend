@@ -16,10 +16,26 @@ const initializeFirebase = () => {
       return null;
     }
 
+    // Clean and format the private key
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    if (privateKey) {
+      // Replace escaped newlines with actual newlines
+      privateKey = privateKey.replace(/\\n/g, '\n');
+      // Remove any leading/trailing whitespace
+      privateKey = privateKey.trim();
+      // Ensure proper PEM format
+      if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+        privateKey = '-----BEGIN PRIVATE KEY-----\n' + privateKey;
+      }
+      if (!privateKey.includes('-----END PRIVATE KEY-----')) {
+        privateKey = privateKey + '\n-----END PRIVATE KEY-----';
+      }
+    }
+
     firebaseApp = admin.initializeApp({
       credential: admin.credential.cert({
         projectId: process.env.FIREBASE_PROJECT_ID,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        privateKey: privateKey,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
       }),
       storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
@@ -29,6 +45,8 @@ const initializeFirebase = () => {
     return firebaseApp;
   } catch (error) {
     console.error('Firebase initialization error:', error.message);
+    const keyPreview = privateKey ? privateKey.substring(0, 50) : 'undefined';
+    console.error('Private key starts with:', keyPreview);
     return null;
   }
 };

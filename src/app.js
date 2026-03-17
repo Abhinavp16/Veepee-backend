@@ -64,11 +64,33 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-// Rate limiting
+// Rate limiting - account based (with IP fallback for guests)
+const keyGenerator = (req) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      // Decode JWT to get user ID (payload is base64 encoded)
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        if (payload.id || payload.userId || payload.sub) {
+          return payload.id || payload.userId || payload.sub;
+        }
+      }
+    }
+  } catch (e) {
+    // If token parsing fails, fall back to IP
+  }
+  // Fall back to IP for unauthenticated requests
+  return req.ip || req.headers['x-forwarded-for'] || 'unknown';
+};
+
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000, // 1 minute
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 200,
   skip: (req) => req.originalUrl.startsWith('/api/v1/health'),
+  keyGenerator,
   message: {
     success: false,
     message: 'Too many requests, please try again later.',

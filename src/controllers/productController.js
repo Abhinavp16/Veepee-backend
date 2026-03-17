@@ -121,8 +121,8 @@ exports.getProductBySlug = async (req, res, next) => {
       ...pricing,
     };
 
-    // Remove raw price fields for non-admin users
-    if (userRole !== 'admin') {
+    // Remove raw price fields for non-admin users, but keep for wholesalers so they can see customer price
+    if (userRole !== 'admin' && userRole !== 'wholesaler') {
       delete responseData.retailPrice;
       delete responseData.wholesalePrice;
     }

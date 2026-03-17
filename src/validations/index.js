@@ -94,6 +94,7 @@ const productValidation = {
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
     category: Joi.string(),
+    brand: Joi.string(),
     minPrice: Joi.number().min(0),
     maxPrice: Joi.number().min(0),
     inStock: Joi.boolean(),
@@ -105,6 +106,8 @@ const productValidation = {
     q: Joi.string().required().min(1),
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
+    category: Joi.string(),
+    brand: Joi.string(),
   }),
 };
 

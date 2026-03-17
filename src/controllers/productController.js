@@ -35,8 +35,8 @@ exports.getProducts = async (req, res, next) => {
 
     // Price filter based on user role
     const priceField = userRole === 'wholesaler' ? 'wholesalePrice' : 'retailPrice';
-    if (category) query.category = category;
-    if (brand) query.brand = brand;
+    if (category) query.category = { $regex: new RegExp(category, 'i') };
+    if (brand) query.brand = { $regex: new RegExp(brand, 'i') };
     if (minPrice) query[priceField] = { ...query[priceField], $gte: Number(minPrice) };
     if (maxPrice) query[priceField] = { ...query[priceField], $lte: Number(maxPrice) };
     if (inStock === 'true') query.stock = { $gt: 0 };
@@ -237,9 +237,9 @@ exports.searchProducts = async (req, res, next) => {
       ],
     };
 
-    // Apply optional filters
-    if (category) query.category = category;
-    if (brand) query.brand = brand;
+    // Apply optional filters (case-insensitive)
+    if (category) query.category = { $regex: new RegExp(category, 'i') };
+    if (brand) query.brand = { $regex: new RegExp(brand, 'i') };
 
     const [products, total] = await Promise.all([
       Product.find(query)

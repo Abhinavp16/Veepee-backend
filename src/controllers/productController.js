@@ -219,23 +219,26 @@ exports.searchProducts = async (req, res, next) => {
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
     const userRole = req.user?.role || 'guest';
 
-    // Build regex pattern for partial matching – escape special chars, split words
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const words = escaped.trim().split(/\s+/).filter(Boolean);
-    const regexPattern = words.map(w => `(?=.*${w})`).join('') + '.*';
-    const regex = new RegExp(regexPattern, 'i');
+    // Build base query
+    const query = { status: PRODUCT_STATUS.ACTIVE };
 
-    const query = {
-      status: PRODUCT_STATUS.ACTIVE,
-      $or: [
+    // Build search regex if q is provided
+    if (q && q.trim().length > 0) {
+      // Build regex pattern for partial matching – escape special chars, split words
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const words = escaped.trim().split(/\s+/).filter(Boolean);
+      const regexPattern = words.map(w => `(?=.*${w})`).join('') + '.*';
+      const regex = new RegExp(regexPattern, 'i');
+
+      query.$or = [
         { name: regex },
         { description: regex },
         { shortDescription: regex },
         { category: regex },
         { tags: { $in: [new RegExp(escaped, 'i')] } },
         { sku: regex },
-      ],
-    };
+      ];
+    }
 
     // Apply optional filters (case-insensitive)
     if (category) query.category = { $regex: new RegExp(category, 'i') };

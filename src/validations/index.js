@@ -93,8 +93,8 @@ const productValidation = {
   list: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
-    category: Joi.string(),
-    brand: Joi.string(),
+    category: Joi.string().allow('', null),
+    brand: Joi.string().allow('', null),
     minPrice: Joi.number().min(0),
     maxPrice: Joi.number().min(0),
     inStock: Joi.boolean(),
@@ -103,11 +103,11 @@ const productValidation = {
   }),
 
   search: Joi.object({
-    q: Joi.string().required().min(1),
+    q: Joi.string().allow('', null),
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
-    category: Joi.string(),
-    brand: Joi.string(),
+    category: Joi.string().allow('', null),
+    brand: Joi.string().allow('', null),
   }),
 };
 

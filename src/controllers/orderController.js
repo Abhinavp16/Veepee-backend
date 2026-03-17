@@ -363,13 +363,14 @@ exports.createOrderFromCart = async (req, res, next) => {
     let orderItems = [];
     let subtotal = 0;
     let productIds = [];
+    let cart = null;
 
     if (items && Array.isArray(items) && items.length > 0) {
       // Buy Now flow - use items from request body
       productIds = items.map(item => item.productId);
     } else {
       // Cart flow - get items from cart
-      const cart = await Cart.findOne({ userId: req.user._id });
+      cart = await Cart.findOne({ userId: req.user._id });
       if (!cart || cart.items.length === 0) {
         throw new BadRequestError('Cart is empty', 'CART_EMPTY');
       }

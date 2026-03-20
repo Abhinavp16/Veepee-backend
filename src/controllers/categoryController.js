@@ -1,36 +1,47 @@
 const Category = require('../models/Category');
 const Product = require('../models/Product');
+const { paginate, formatPaginationResponse } = require('../utils/helpers');
 
 // @desc    Get all categories
 // @route   GET /api/v1/categories
 // @access  Public
 exports.getCategories = async (req, res, next) => {
   try {
-    const { parent, active } = req.query;
-    
+    const { parent, active, search } = req.query;
+    const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+
     const query = {};
-    
+
     // Filter by parent (null for root categories)
     if (parent === 'root') {
       query.parent = null;
     } else if (parent) {
       query.parent = parent;
     }
-    
+
     // Filter by active status
     if (active !== undefined) {
       query.isActive = active === 'true';
     }
 
-    const categories = await Category.find(query)
-      .populate('parent', 'name slug')
-      .sort({ order: 1, name: 1 })
-      .lean();
+    // Search by name
+    if (search) {
+      query.name = { $regex: search, $options: 'i' };
+    }
+
+    const [categories, total] = await Promise.all([
+      Category.find(query)
+        .populate('parent', 'name slug')
+        .sort({ order: 1, name: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Category.countDocuments(query),
+    ]);
 
     res.json({
       success: true,
-      count: categories.length,
-      data: categories,
+      ...formatPaginationResponse(categories, total, page, limit),
     });
   } catch (error) {
     next(error);

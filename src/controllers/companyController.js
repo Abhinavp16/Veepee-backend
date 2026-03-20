@@ -1,20 +1,30 @@
 const { Company, Product } = require('../models');
 const { NotFoundError, ConflictError } = require('../utils/errors');
+const { paginate, formatPaginationResponse } = require('../utils/helpers');
 
 exports.getAllCompanies = async (req, res, next) => {
   try {
-    const { active } = req.query;
-    
+    const { active, search } = req.query;
+    const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+
     const query = {};
     if (active !== undefined) {
       query.isActive = active === 'true';
     }
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+      ];
+    }
 
-    const companies = await Company.find(query).sort({ name: 1 });
+    const [companies, total] = await Promise.all([
+      Company.find(query).sort({ name: 1 }).skip(skip).limit(limit).lean(),
+      Company.countDocuments(query),
+    ]);
 
     res.json({
       success: true,
-      data: companies,
+      ...formatPaginationResponse(companies, total, page, limit),
     });
   } catch (error) {
     next(error);

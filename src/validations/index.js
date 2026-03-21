@@ -344,6 +344,14 @@ const adminValidation = {
       image: Joi.string().allow('', null),
       order: Joi.number().integer(),
     })).length(5),
+    labels: Joi.array().items(Joi.object({
+      title: Joi.string().required(),
+      sourceType: Joi.string().valid('image', 'icon').default('image'),
+      image: Joi.string().allow('', null),
+      icon: Joi.string().allow('', null),
+      isActive: Joi.boolean(),
+      order: Joi.number().integer(),
+    })),
     productCategories: Joi.array().items(Joi.object({
       name: Joi.string().required(),
       description: Joi.string().allow('', null),

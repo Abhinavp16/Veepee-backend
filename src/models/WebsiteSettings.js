@@ -26,6 +26,15 @@ const websiteHeroCardSchema = new mongoose.Schema({
   order: { type: Number, default: 0 },
 }, { _id: false });
 
+const websiteLabelSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  sourceType: { type: String, enum: ['image', 'icon'], default: 'image' },
+  image: String,
+  icon: String,
+  isActive: { type: Boolean, default: true },
+  order: { type: Number, default: 0 },
+}, { _id: false });
+
 const websiteSectionConfigSchema = new mongoose.Schema({
   eyebrow: String,
   title: String,
@@ -50,6 +59,10 @@ const websiteSettingsSchema = new mongoose.Schema({
   heroCards: {
     type: [websiteHeroCardSchema],
     default: defaultHeroCards,
+  },
+  labels: {
+    type: [websiteLabelSchema],
+    default: [],
   },
   productCategories: {
     type: [websiteCategorySchema],
@@ -88,6 +101,7 @@ websiteSettingsSchema.statics.getSettings = async function () {
     settings = await this.create({
       _id: 'website_settings',
       heroCards: defaultHeroCards,
+      labels: [],
       productCategories: [],
       featuredProducts: [],
       categoriesSection: {
@@ -107,6 +121,11 @@ websiteSettingsSchema.statics.getSettings = async function () {
 
   if (!Array.isArray(settings.heroCards) || settings.heroCards.length !== 5) {
     settings.heroCards = defaultHeroCards;
+    await settings.save();
+  }
+
+  if (!Array.isArray(settings.labels)) {
+    settings.labels = [];
     await settings.save();
   }
 

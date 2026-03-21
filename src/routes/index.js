@@ -344,6 +344,9 @@ router.get('/settings/website-content', async (req, res, next) => {
     const heroCards = (settings.heroCards || [])
       .sort((a, b) => (a.order || 0) - (b.order || 0));
 
+    const labels = (settings.labels || [])
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
     const categoriesSection = settings.categoriesSection || {};
     const featuredSection = settings.featuredSection || {};
 
@@ -353,6 +356,7 @@ router.get('/settings/website-content', async (req, res, next) => {
         productCategories,
         featuredProducts,
         heroCards,
+        labels,
         categoriesSection,
         featuredSection,
       },

@@ -19,7 +19,7 @@ exports.updateWebsiteSettings = async (req, res, next) => {
       settings = new WebsiteSettings({ _id: 'website_settings' });
     }
 
-    const allowedFields = ['heroCards', 'productCategories', 'featuredProducts', 'categoriesSection', 'featuredSection'];
+    const allowedFields = ['heroCards', 'labels', 'productCategories', 'featuredProducts', 'categoriesSection', 'featuredSection'];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         settings[field] = req.body[field];

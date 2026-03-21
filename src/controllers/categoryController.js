@@ -1,6 +1,28 @@
 const Category = require('../models/Category');
 const Product = require('../models/Product');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
+const { PRODUCT_STATUS } = require('../utils/constants');
+
+async function getProductCountMap(categorySlugs = []) {
+  if (categorySlugs.length === 0) return new Map();
+
+  const counts = await Product.aggregate([
+    {
+      $match: {
+        category: { $in: categorySlugs },
+        status: { $ne: PRODUCT_STATUS.ARCHIVED },
+      },
+    },
+    {
+      $group: {
+        _id: '$category',
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  return new Map(counts.map((item) => [item._id, item.count]));
+}
 
 // @desc    Get all categories
 // @route   GET /api/v1/categories
@@ -39,9 +61,17 @@ exports.getCategories = async (req, res, next) => {
       Category.countDocuments(query),
     ]);
 
+    const countsBySlug = await getProductCountMap(
+      categories.map((category) => category.slug).filter(Boolean)
+    );
+    const categoriesWithCounts = categories.map((category) => ({
+      ...category,
+      productCount: countsBySlug.get(category.slug) ?? 0,
+    }));
+
     res.json({
       success: true,
-      ...formatPaginationResponse(categories, total, page, limit),
+      ...formatPaginationResponse(categoriesWithCounts, total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -64,9 +94,15 @@ exports.getCategory = async (req, res, next) => {
       });
     }
 
+    const categoryData = category.toObject();
+    categoryData.productCount = await Product.countDocuments({
+      category: category.slug,
+      status: { $ne: PRODUCT_STATUS.ARCHIVED },
+    });
+
     res.json({
       success: true,
-      data: category,
+      data: categoryData,
     });
   } catch (error) {
     next(error);
@@ -242,7 +278,7 @@ exports.updateProductCount = async (categorySlug) => {
   try {
     const count = await Product.countDocuments({ 
       category: categorySlug,
-      status: 'active'
+      status: { $ne: PRODUCT_STATUS.ARCHIVED }
     });
     
     await Category.findOneAndUpdate(

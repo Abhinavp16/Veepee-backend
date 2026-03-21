@@ -5,6 +5,7 @@ const { deleteImage } = require('../../config/cloudinary');
 const { getStorage } = require('../../config/firebase');
 const { transliterateToHindi } = require('../../services/hindiTransliterationService');
 const { PRODUCT_STATUS } = require('../../utils/constants');
+const { updateProductCount } = require('../categoryController');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const slugify = require('slugify');
@@ -118,6 +119,9 @@ exports.createProduct = async (req, res, next) => {
     }
 
     const product = await Product.create(productData);
+    if (product.category) {
+      await updateProductCount(product.category);
+    }
 
     res.status(201).json({
       success: true,
@@ -136,6 +140,7 @@ exports.updateProduct = async (req, res, next) => {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
+    const previousCategory = product.category;
     const updateData = { ...req.body };
 
     if (updateData.name && updateData.name !== product.name) {
@@ -162,6 +167,11 @@ exports.updateProduct = async (req, res, next) => {
 
     Object.assign(product, updateData);
     await product.save();
+    await Promise.all(
+      [...new Set([previousCategory, product.category].filter(Boolean))].map((categorySlug) =>
+        updateProductCount(categorySlug)
+      )
+    );
 
     res.json({
       success: true,
@@ -180,8 +190,12 @@ exports.deleteProduct = async (req, res, next) => {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
+    const previousCategory = product.category;
     product.status = 'archived';
     await product.save();
+    if (previousCategory) {
+      await updateProductCount(previousCategory);
+    }
 
     res.json({
       success: true,

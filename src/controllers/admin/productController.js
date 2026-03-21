@@ -40,23 +40,52 @@ async function uploadFilesToFirebase(files, folder = 'products') {
   return results;
 }
 
+function toLabelIdArray(labelIds = []) {
+  if (Array.isArray(labelIds)) {
+    return labelIds;
+  }
+
+  if (typeof labelIds === 'string') {
+    const trimmed = labelIds.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (_) {}
+
+    return trimmed.split(',').map((value) => value.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
 async function normalizeProductLabelIds(labelIds = []) {
-  if (!Array.isArray(labelIds) || labelIds.length === 0) {
+  const incomingValues = toLabelIdArray(labelIds)
+    .map((value) => {
+      if (value && typeof value === 'object') {
+        return String(value.id || value.title || '').trim();
+      }
+      return String(value || '').trim();
+    })
+    .filter(Boolean);
+
+  if (incomingValues.length === 0) {
     return [];
   }
 
   const settings = await WebsiteSettings.getSettings();
   const labels = Array.isArray(settings?.labels) ? settings.labels : [];
-  const normalizedValues = labelIds
-    .map((value) => String(value || '').trim())
-    .filter(Boolean);
 
-  const matchedIds = normalizedValues
+  const matchedIds = incomingValues
     .map((value) => {
+      const normalizedValue = value.toLowerCase();
       const match = labels.find((label) => {
-        const labelId = String(label?.id || '').trim();
-        const labelTitle = String(label?.title || '').trim();
-        return value === labelId || value === labelTitle;
+        const labelId = String(label?.id || '').trim().toLowerCase();
+        const labelTitle = String(label?.title || '').trim().toLowerCase();
+        return normalizedValue === labelId || normalizedValue === labelTitle;
       });
 
       return match ? String(match.id || '').trim() : '';

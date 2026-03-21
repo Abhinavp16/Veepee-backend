@@ -1,5 +1,6 @@
 const { Review } = require('../../models');
 const { AppError } = require('../../utils/errors');
+const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 
 // Create Review
 exports.createReview = async (req, res, next) => {
@@ -20,14 +21,31 @@ exports.createReview = async (req, res, next) => {
 // Get All Reviews (Admin)
 exports.getAllReviews = async (req, res, next) => {
     try {
-        const reviews = await Review.find().sort('-createdAt');
+        const { rating, productId, search } = req.query;
+        const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+
+        const query = {};
+        if (rating) query.rating = parseInt(rating);
+        if (productId) query.productId = productId;
+        if (search) {
+            query.$or = [
+                { comment: { $regex: search, $options: 'i' } },
+                { 'userSnapshot.name': { $regex: search, $options: 'i' } },
+            ];
+        }
+
+        const [reviews, total] = await Promise.all([
+            Review.find(query)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            Review.countDocuments(query),
+        ]);
 
         res.status(200).json({
             success: true,
-            results: reviews.length,
-            data: {
-                reviews,
-            },
+            ...formatPaginationResponse(reviews, total, page, limit),
         });
     } catch (error) {
         next(error);

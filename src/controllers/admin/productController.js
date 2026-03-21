@@ -1,4 +1,4 @@
-const { Product, StockLog } = require('../../models');
+const { Product, StockLog, WebsiteSettings } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse, generateSKU } = require('../../utils/helpers');
 const { deleteImage } = require('../../config/cloudinary');
@@ -38,6 +38,32 @@ async function uploadFilesToFirebase(files, folder = 'products') {
     results.push({ url: publicUrl, publicId: filename });
   }
   return results;
+}
+
+async function normalizeProductLabelIds(labelIds = []) {
+  if (!Array.isArray(labelIds) || labelIds.length === 0) {
+    return [];
+  }
+
+  const settings = await WebsiteSettings.getSettings();
+  const labels = Array.isArray(settings?.labels) ? settings.labels : [];
+  const normalizedValues = labelIds
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const matchedIds = normalizedValues
+    .map((value) => {
+      const match = labels.find((label) => {
+        const labelId = String(label?.id || '').trim();
+        const labelTitle = String(label?.title || '').trim();
+        return value === labelId || value === labelTitle;
+      });
+
+      return match ? String(match.id || '').trim() : '';
+    })
+    .filter(Boolean);
+
+  return [...new Set(matchedIds)];
 }
 
 exports.getProducts = async (req, res, next) => {
@@ -117,6 +143,9 @@ exports.createProduct = async (req, res, next) => {
     if (typeof productData.tags === 'string') {
       productData.tags = JSON.parse(productData.tags);
     }
+    if (productData.labelIds !== undefined) {
+      productData.labelIds = await normalizeProductLabelIds(productData.labelIds);
+    }
 
     const product = await Product.create(productData);
     if (product.category) {
@@ -163,6 +192,9 @@ exports.updateProduct = async (req, res, next) => {
     }
     if (typeof updateData.tags === 'string') {
       updateData.tags = JSON.parse(updateData.tags);
+    }
+    if (updateData.labelIds !== undefined) {
+      updateData.labelIds = await normalizeProductLabelIds(updateData.labelIds);
     }
 
     Object.assign(product, updateData);

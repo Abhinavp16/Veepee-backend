@@ -27,6 +27,10 @@ const websiteHeroCardSchema = new mongoose.Schema({
 }, { _id: false });
 
 const websiteLabelSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: () => new mongoose.Types.ObjectId().toString(),
+  },
   title: { type: String, required: true },
   sourceType: { type: String, enum: ['image', 'icon'], default: 'image' },
   image: String,
@@ -127,6 +131,32 @@ websiteSettingsSchema.statics.getSettings = async function () {
   if (!Array.isArray(settings.labels)) {
     settings.labels = [];
     await settings.save();
+  }
+
+  if (Array.isArray(settings.labels)) {
+    const nextLabels = settings.labels.map((label = {}) => {
+      if (label.id) {
+        return label;
+      }
+
+      if (typeof label.toObject === 'function') {
+        return {
+          ...label.toObject(),
+          id: new mongoose.Types.ObjectId().toString(),
+        };
+      }
+
+      return {
+        ...label,
+        id: new mongoose.Types.ObjectId().toString(),
+      };
+    });
+
+    const hasMissingIds = nextLabels.some((label, index) => label.id !== settings.labels[index]?.id);
+    if (hasMissingIds) {
+      settings.labels = nextLabels;
+      await settings.save();
+    }
   }
 
   return settings;

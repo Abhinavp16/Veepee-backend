@@ -146,6 +146,10 @@ const productSchema = new mongoose.Schema({
     ref: 'Company',
     default: null,
   },
+  labelIds: [{
+    type: String,
+    trim: true,
+  }],
 
   viewCount: {
     type: Number,

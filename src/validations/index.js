@@ -220,6 +220,7 @@ const adminValidation = {
     status: Joi.string().valid('active', 'draft', 'archived').default('draft'),
     isFeatured: Joi.boolean().default(false),
     isHot: Joi.boolean().default(false),
+    labelIds: Joi.array().items(Joi.string()),
     rating: Joi.number().min(0).max(5).default(4.5),
     purchaseCountMin: Joi.number().integer().min(0).default(0),
     purchaseCountMax: Joi.number().integer().min(0).default(0),
@@ -256,6 +257,7 @@ const adminValidation = {
     status: Joi.string().valid('active', 'draft', 'archived'),
     isFeatured: Joi.boolean(),
     isHot: Joi.boolean(),
+    labelIds: Joi.array().items(Joi.string()),
     rating: Joi.number().min(0).max(5),
     purchaseCountMin: Joi.number().integer().min(0),
     purchaseCountMax: Joi.number().integer().min(0),
@@ -345,6 +347,7 @@ const adminValidation = {
       order: Joi.number().integer(),
     })).length(5),
     labels: Joi.array().items(Joi.object({
+      id: Joi.string().allow('', null),
       title: Joi.string().required(),
       sourceType: Joi.string().valid('image', 'icon').default('image'),
       image: Joi.string().allow('', null),

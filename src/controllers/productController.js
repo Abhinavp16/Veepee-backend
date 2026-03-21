@@ -1,4 +1,4 @@
-const { Product, Analytics } = require('../models');
+const { Product, Analytics, WebsiteSettings } = require('../models');
 const { NotFoundError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS, ANALYTICS_EVENTS } = require('../utils/constants');
@@ -120,10 +120,50 @@ exports.getProductBySlug = async (req, res, next) => {
 
     // Build response with role-based pricing
     const pricing = getPriceForUser(product, userRole);
+    let resolvedLabels = [];
+    if (Array.isArray(product.labelIds) && product.labelIds.length > 0) {
+      const settings = await WebsiteSettings.getSettings();
+      const labelMap = new Map(
+        (settings.labels || []).map((label) => [
+          String(label?.id || ''),
+          {
+            id: String(label?.id || ''),
+            title: String(label?.title || '').trim(),
+            sourceType: label?.sourceType === 'image' ? 'image' : 'icon',
+            image: String(label?.image || '').trim(),
+            icon: String(label?.icon || '').trim(),
+            order: Number.isFinite(label?.order) ? label.order : 0,
+          },
+        ])
+      );
+
+      const labelsByTitle = new Map(
+        (settings.labels || []).map((label) => [
+          String(label?.title || '').trim(),
+          {
+            id: String(label?.id || ''),
+            title: String(label?.title || '').trim(),
+            sourceType: label?.sourceType === 'image' ? 'image' : 'icon',
+            image: String(label?.image || '').trim(),
+            icon: String(label?.icon || '').trim(),
+            order: Number.isFinite(label?.order) ? label.order : 0,
+          },
+        ])
+      );
+
+      resolvedLabels = product.labelIds
+        .map((labelId) => {
+          const value = String(labelId || '').trim();
+          return labelMap.get(value) || labelsByTitle.get(value);
+        })
+        .filter(Boolean);
+    }
+
     const responseData = {
       ...product,
       id: product._id,
       ...pricing,
+      labels: resolvedLabels,
     };
 
     // Remove raw price fields for non-admin users, but keep for wholesalers so they can see customer price

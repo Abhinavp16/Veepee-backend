@@ -1,4 +1,16 @@
 const { WebsiteSettings } = require('../../models');
+const mongoose = require('mongoose');
+
+const normalizeLabel = (label = {}, order = 0) => ({
+  ...(typeof label?.toObject === 'function' ? label.toObject() : label),
+  id: String(label?.id || new mongoose.Types.ObjectId()),
+  title: String(label?.title || '').trim(),
+  sourceType: label?.sourceType === 'image' ? 'image' : 'icon',
+  image: String(label?.image || '').trim(),
+  icon: String(label?.icon || '').trim(),
+  isActive: label?.isActive !== false,
+  order: Number.isFinite(label?.order) ? label.order : order,
+});
 
 exports.getWebsiteSettings = async (req, res, next) => {
   try {
@@ -24,6 +36,10 @@ exports.updateWebsiteSettings = async (req, res, next) => {
       if (req.body[field] !== undefined) {
         settings[field] = req.body[field];
       }
+    }
+
+    if (Array.isArray(settings.labels)) {
+      settings.labels = settings.labels.map((label, index) => normalizeLabel(label, index));
     }
 
     if (!Array.isArray(settings.heroCards) || settings.heroCards.length !== 5) {

@@ -88,7 +88,12 @@ async function normalizeProductLabelIds(labelIds = []) {
         return normalizedValue === labelId || normalizedValue === labelTitle;
       });
 
-      return match ? String(match.id || '').trim() : value;
+      if (!match) {
+        return value;
+      }
+
+      const resolvedId = String(match.id || '').trim();
+      return resolvedId || value;
     })
     .filter(Boolean);
 

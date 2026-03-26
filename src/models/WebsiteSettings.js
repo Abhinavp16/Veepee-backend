@@ -134,26 +134,25 @@ websiteSettingsSchema.statics.getSettings = async function () {
   }
 
   if (Array.isArray(settings.labels)) {
+    let needsSave = false;
     const nextLabels = settings.labels.map((label = {}) => {
-      if (label.id) {
-        return label;
+      // Convert to plain object if it's a mongoose document
+      const plainLabel = typeof label.toObject === 'function' ? label.toObject() : { ...label };
+
+      // Check if label already has a valid ID
+      if (plainLabel.id && String(plainLabel.id).trim()) {
+        return plainLabel;
       }
 
-      if (typeof label.toObject === 'function') {
-        return {
-          ...label.toObject(),
-          id: new mongoose.Types.ObjectId().toString(),
-        };
-      }
-
+      // Generate ID for labels without one
+      needsSave = true;
       return {
-        ...label,
+        ...plainLabel,
         id: new mongoose.Types.ObjectId().toString(),
       };
     });
 
-    const hasMissingIds = nextLabels.some((label, index) => label.id !== settings.labels[index]?.id);
-    if (hasMissingIds) {
+    if (needsSave) {
       settings.labels = nextLabels;
       await settings.save();
     }

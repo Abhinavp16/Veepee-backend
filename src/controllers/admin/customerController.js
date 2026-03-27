@@ -1,4 +1,5 @@
-const { User, Order, Negotiation } = require('../../models');
+const { User, Order, Negotiation, DeviceToken, Notification } = require('../../models');
+const notificationService = require('../../services/notificationService');
 const { NotFoundError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 
@@ -146,6 +147,49 @@ exports.upgradeCustomer = async (req, res, next) => {
     res.json({
       success: true,
       message: `Customer application ${action}ed successfully.`
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.sendNotification = async (req, res, next) => {
+  try {
+    const { userIds, title, body } = req.body;
+
+    const tokens = await DeviceToken.find({
+      userId: { $in: userIds },
+      isActive: true,
+    }).select('fcmToken');
+
+    if (!tokens || tokens.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active device tokens found for selected customers.',
+      });
+    }
+
+    const fcmTokens = tokens.map((t) => t.fcmToken);
+    await notificationService.sendToMultipleDevices(fcmTokens, { title, body }, { type: 'custom_admin_notification' });
+
+    // Save to Notification database for history in the app
+    const notificationsToSave = userIds.map(userId => ({
+      userId,
+      title,
+      body,
+      type: 'general',
+      data: { type: 'custom_admin_notification' }
+    }));
+    
+    try {
+      await Notification.insertMany(notificationsToSave);
+    } catch (saveError) {
+      console.error('Error saving notifications to DB:', saveError);
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification sent and saved successfully.',
     });
   } catch (error) {
     next(error);

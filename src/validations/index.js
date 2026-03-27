@@ -460,6 +460,12 @@ const adminValidation = {
     endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
     isActive: Joi.boolean(),
   }),
+
+  sendNotification: Joi.object({
+    userIds: Joi.array().items(Joi.string().required()).min(1).required(),
+    title: Joi.string().required().max(100),
+    body: Joi.string().required().max(500),
+  }),
 };
 
 module.exports = {

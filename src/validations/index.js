@@ -82,7 +82,7 @@ const authValidation = {
   }),
   convertWholesaler: Joi.object({
     businessName: Joi.string().required().max(200),
-    gstNumber: Joi.string().required().length(15),
+    gstNumber: Joi.string().allow('', null).max(15),
     businessAddress: Joi.string().required().max(500),
     contactPerson: Joi.string().required().max(100),
     phone: Joi.string().required(),

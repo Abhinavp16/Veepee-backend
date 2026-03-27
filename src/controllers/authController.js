@@ -526,8 +526,7 @@ exports.convertToWholesaler = async (req, res, next) => {
     const { businessName, gstNumber, businessAddress, contactPerson, phone } = req.body;
     const user = req.user;
 
-    // Update user role and business info
-    user.role = USER_ROLES.WHOLESALER;
+    // Update user business info (Admin verifies before role update)
     user.businessInfo = {
       ...user.businessInfo,
       businessName,

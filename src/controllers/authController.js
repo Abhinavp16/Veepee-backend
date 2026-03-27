@@ -533,7 +533,7 @@ exports.convertToWholesaler = async (req, res, next) => {
         proofImageUrls = await Promise.all(
           req.files.map(async (file) => {
             const webpBuffer = await sharp(file.buffer).webp({ quality: 80 }).toBuffer();
-            const filename = `proofs/\${user._id}/\${uuidv4()}.webp`;
+            const filename = `proofs/${user._id}/${uuidv4()}.webp`;
             const fileUpload = bucket.file(filename);
 
             await new Promise((resolve, reject) => {
@@ -546,7 +546,7 @@ exports.convertToWholesaler = async (req, res, next) => {
             });
 
             await fileUpload.makePublic();
-            return `https://storage.googleapis.com/\${bucket.name}/\${filename}`;
+            return `https://storage.googleapis.com/${bucket.name}/${filename}`;
           })
         );
       }

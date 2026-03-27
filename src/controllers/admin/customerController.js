@@ -118,6 +118,31 @@ exports.upgradeCustomer = async (req, res, next) => {
 
     await customer.save();
 
+    if (customer.fcmTokens && customer.fcmTokens.length > 0) {
+      const { getMessaging } = require('../../config/firebase');
+      const messaging = getMessaging();
+      if (messaging) {
+        const payload = {
+          notification: {
+            title: action === 'accept' ? 'Account Upgraded! 🎉' : 'Application Update',
+            body: action === 'accept' 
+              ? 'Your wholesaler account has been approved. Enjoy bulk access!' 
+              : 'Your wholesaler application has been reviewed.',
+          },
+          data: {
+            type: 'ROLE_UPDATED',
+            action: action
+          },
+          tokens: customer.fcmTokens,
+        };
+        try {
+          await messaging.sendEachForMulticast(payload);
+        } catch (fcmErr) {
+          console.error('FCM Notification error:', fcmErr);
+        }
+      }
+    }
+
     res.json({
       success: true,
       message: `Customer application ${action}ed successfully.`

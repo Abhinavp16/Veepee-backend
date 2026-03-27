@@ -59,6 +59,7 @@ const userSchema = new mongoose.Schema({
     contactPerson: { type: String, default: null },
     verified: { type: Boolean, default: false },
     verifiedAt: { type: Date, default: null },
+    proofImages: [{ type: String }],
   },
 
   fcmTokens: [{

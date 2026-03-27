@@ -526,6 +526,32 @@ exports.convertToWholesaler = async (req, res, next) => {
     const { businessName, gstNumber, businessAddress, contactPerson, phone } = req.body;
     const user = req.user;
 
+    let proofImageUrls = [];
+    if (req.files && req.files.length > 0) {
+      const bucket = getStorage();
+      if (bucket) {
+        proofImageUrls = await Promise.all(
+          req.files.map(async (file) => {
+            const webpBuffer = await sharp(file.buffer).webp({ quality: 80 }).toBuffer();
+            const filename = `proofs/\${user._id}/\${uuidv4()}.webp`;
+            const fileUpload = bucket.file(filename);
+
+            await new Promise((resolve, reject) => {
+              const blobStream = fileUpload.createWriteStream({
+                metadata: { contentType: 'image/webp' },
+              });
+              blobStream.on('error', reject);
+              blobStream.on('finish', resolve);
+              blobStream.end(webpBuffer);
+            });
+
+            await fileUpload.makePublic();
+            return `https://storage.googleapis.com/\${bucket.name}/\${filename}`;
+          })
+        );
+      }
+    }
+
     // Update user business info (Admin verifies before role update)
     user.businessInfo = {
       ...user.businessInfo,
@@ -534,6 +560,7 @@ exports.convertToWholesaler = async (req, res, next) => {
       businessAddress, // We might need to add this to the model
       contactPerson,
       verified: false,
+      proofImages: proofImageUrls.length > 0 ? proofImageUrls : (user.businessInfo?.proofImages || []),
     };
 
     // Also update phone/name if changed? Usually contact person is just name

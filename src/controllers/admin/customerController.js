@@ -90,3 +90,40 @@ exports.getCustomerById = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.upgradeCustomer = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body;
+
+    const customer = await User.findById(id);
+
+    if (!customer || customer.role === 'admin') {
+      throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+    }
+
+    if (action === 'accept') {
+      customer.role = 'wholesaler';
+      if (customer.businessInfo) {
+        customer.businessInfo.verified = true;
+        customer.businessInfo.verifiedAt = new Date();
+      }
+    } else if (action === 'reject') {
+      if (customer.businessInfo) {
+        customer.businessInfo.verified = false;
+        // Optionally clear the businessName to mark as rejected and hide from pending list
+        customer.businessInfo.businessName = null;
+      }
+    }
+
+    await customer.save();
+
+    res.json({
+      success: true,
+      message: `Customer application ${action}ed successfully.`
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

@@ -74,6 +74,7 @@ router.put('/payments/:id/reject', validate(adminValidation.rejectPayment), admi
 // Customers
 router.get('/customers', adminCustomerController.getCustomers);
 router.get('/customers/:id', adminCustomerController.getCustomerById);
+router.put('/customers/:id/upgrade', adminCustomerController.upgradeCustomer);
 
 // Analytics
 router.get('/analytics/dashboard', adminAnalyticsController.getDashboardStats);

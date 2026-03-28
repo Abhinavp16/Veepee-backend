@@ -57,6 +57,11 @@ const userSchema = new mongoose.Schema({
     gstNumber: { type: String, default: null },
     businessAddress: { type: String, default: null },
     contactPerson: { type: String, default: null },
+    status: { 
+      type: String, 
+      enum: ['none', 'pending', 'accepted', 'rejected'], 
+      default: 'none' 
+    },
     verified: { type: Boolean, default: false },
     verifiedAt: { type: Date, default: null },
     proofImages: [{ type: String }],

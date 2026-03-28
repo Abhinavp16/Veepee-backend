@@ -106,14 +106,15 @@ exports.upgradeCustomer = async (req, res, next) => {
     if (action === 'accept') {
       customer.role = 'wholesaler';
       if (customer.businessInfo) {
+        customer.businessInfo.status = 'accepted';
         customer.businessInfo.verified = true;
         customer.businessInfo.verifiedAt = new Date();
       }
     } else if (action === 'reject') {
       if (customer.businessInfo) {
+        customer.businessInfo.status = 'rejected';
         customer.businessInfo.verified = false;
-        // Optionally clear the businessName to mark as rejected and hide from pending list
-        customer.businessInfo.businessName = null;
+        // Keep data so admin can see history and user can see rejection details
       }
     }
 
@@ -127,8 +128,8 @@ exports.upgradeCustomer = async (req, res, next) => {
           notification: {
             title: action === 'accept' ? 'Account Upgraded! 🎉' : 'Application Update',
             body: action === 'accept' 
-              ? 'Your wholesaler account has been approved. Enjoy bulk access!' 
-              : 'Your wholesaler application has been reviewed.',
+              ? 'Your wholesaler account has been approved. Enjoy exclusive bulk access!' 
+              : 'Your wholesaler application was not approved. Please review your details and re-apply from your profile.',
           },
           data: {
             type: 'ROLE_UPDATED',

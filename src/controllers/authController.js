@@ -559,6 +559,7 @@ exports.convertToWholesaler = async (req, res, next) => {
       gstNumber,
       businessAddress, // We might need to add this to the model
       contactPerson,
+      status: 'pending',
       verified: false,
       proofImages: proofImageUrls.length > 0 ? proofImageUrls : (user.businessInfo?.proofImages || []),
     };

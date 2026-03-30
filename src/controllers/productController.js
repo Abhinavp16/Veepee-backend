@@ -166,6 +166,7 @@ exports.getProductBySlug = async (req, res, next) => {
       labels: resolvedLabels,
     };
 
+
     // Remove raw price fields for non-admin users, but keep for wholesalers so they can see customer price
     if (userRole !== 'admin' && userRole !== 'wholesaler') {
       delete responseData.retailPrice;
@@ -428,3 +429,61 @@ exports.updateProductNameHindi = async (req, res, next) => {
   }
 };
 
+
+exports.getRelatedProducts = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userRole = req.user?.role || 'guest';
+    const limit = parseInt(req.query.limit) || 8;
+
+    const isObjectId = require('mongoose').Types.ObjectId.isValid(id);
+    let productQuery = { status: 'active' };
+    if (isObjectId && id.length === 24) {
+      productQuery._id = id;
+    } else {
+      productQuery.slug = id;
+    }
+
+    const { Product } = require('../models');
+    const currentProduct = await Product.findOne(productQuery).select('category _id');
+    if (!currentProduct) return res.json({ success: true, data: [] });
+
+    const relatedProducts = await Product.find({
+      status: 'active',
+      category: currentProduct.category,
+      _id: { $ne: currentProduct._id }
+    })
+      .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images rating isFeatured isHot isNew purchaseCountMin purchaseCountMax')
+      .limit(limit)
+      .lean();
+
+    const formattedProducts = relatedProducts.map(p => {
+      const pricing = userRole === 'wholesaler'
+        ? { price: p.wholesalePrice, mrp: p.mrp, retailPrice: p.retailPrice, wholesalePrice: p.wholesalePrice, minWholesaleQuantity: p.minWholesaleQuantity }
+        : { price: p.retailPrice, mrp: p.mrp };
+      return {
+        id: p._id,
+        name: p.name,
+        nameHindi: p.nameHindi,
+        slug: p.slug,
+        shortDescription: p.shortDescription,
+        category: p.category,
+        brand: p.brand || '',
+        ...pricing,
+        stock: p.stock,
+        inStock: p.stock > 0,
+        primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
+        isFeatured: p.isFeatured,
+        isHot: p.isHot,
+        isNew: p.isNew,
+        rating: p.rating,
+        purchaseCountMin: p.purchaseCountMin,
+        purchaseCountMax: p.purchaseCountMax,
+      };
+    });
+
+    res.json({ success: true, data: formattedProducts });
+  } catch (error) {
+    next(error);
+  }
+};

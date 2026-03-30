@@ -9,6 +9,7 @@ router.get('/', optionalAuth, validate(productValidation.list, 'query'), product
 router.get('/categories', optionalAuth, productController.getCategories);
 router.get('/featured', optionalAuth, productController.getFeaturedProducts);
 router.get('/search', optionalAuth, validate(productValidation.search, 'query'), productController.searchProducts);
+router.get('/:id/related', optionalAuth, productController.getRelatedProducts);
 router.get('/:slug', optionalAuth, productController.getProductBySlug);
 router.post('/:id/view', optionalAuth, productController.trackProductView);
 router.post('/:id/event', optionalAuth, productController.trackProductEvent);

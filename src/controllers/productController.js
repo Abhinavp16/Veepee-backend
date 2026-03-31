@@ -1,4 +1,4 @@
-const { Product, Analytics, WebsiteSettings } = require('../models');
+const { Product, Analytics, WebsiteSettings, Company } = require('../models');
 const { NotFoundError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS, ANALYTICS_EVENTS } = require('../utils/constants');
@@ -37,14 +37,28 @@ exports.getProducts = async (req, res, next) => {
 
     // Price filter based on user role
     const priceField = userRole === 'wholesaler' ? 'wholesalePrice' : 'retailPrice';
+    
     if (category) query.category = { $regex: new RegExp(category, 'i') };
-    if (brand) query.brand = { $regex: new RegExp(brand, 'i') };
+    
+    // Filter by brand (checks both product.brand and product.company)
+    if (brand) {
+      const matchingCompanies = await Company.find({
+        name: { $regex: new RegExp(brand, 'i') }
+      }).select('_id');
+      const companyIds = matchingCompanies.map(c => c._id);
+      
+      query.$or = [
+        { brand: { $regex: new RegExp(brand, 'i') } },
+        { company: { $in: companyIds } }
+      ];
+    }
+    
     if (minPrice) query[priceField] = { ...query[priceField], $gte: Number(minPrice) };
-
-    console.log('getProducts final query:', JSON.stringify(query));
     if (maxPrice) query[priceField] = { ...query[priceField], $lte: Number(maxPrice) };
     if (inStock === 'true') query.stock = { $gt: 0 };
     if (featured === 'true') query.isFeatured = true;
+
+    console.log('getProducts final query:', JSON.stringify(query));
 
     let sortOption = { createdAt: -1 };
     if (sort) {
@@ -57,7 +71,8 @@ exports.getProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax')
+        .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax company')
+        .populate('company', 'name')
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -74,7 +89,7 @@ exports.getProducts = async (req, res, next) => {
         slug: p.slug,
         shortDescription: p.shortDescription,
         category: p.category,
-        brand: p.brand || '',
+        brand: p.brand || p.company?.name || '',
         ...pricing,
         stock: p.stock,
         inStock: p.stock > 0,
@@ -165,7 +180,6 @@ exports.getProductBySlug = async (req, res, next) => {
       ...pricing,
       labels: resolvedLabels,
     };
-
 
     // Remove raw price fields for non-admin users, but keep for wholesalers so they can see customer price
     if (userRole !== 'admin' && userRole !== 'wholesaler') {
@@ -269,33 +283,58 @@ exports.searchProducts = async (req, res, next) => {
     // Build base query
     const query = { status: PRODUCT_STATUS.ACTIVE };
 
-    // Build search regex if q is provided
+    // Use $and if we have multiple major conditions (q, category, brand)
+    const andConditions = [];
+
+    // Search query condition
     if (q && q.trim().length > 0) {
-      // Build regex pattern for partial matching – escape special chars, split words
       const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const words = escaped.trim().split(/\s+/).filter(Boolean);
       const regexPattern = words.map(w => `(?=.*${w})`).join('') + '.*';
       const regex = new RegExp(regexPattern, 'i');
 
-      query.$or = [
-        { name: regex },
-        { description: regex },
-        { shortDescription: regex },
-        { category: regex },
-        { tags: { $in: [new RegExp(escaped, 'i')] } },
-        { sku: regex },
-      ];
+      andConditions.push({
+        $or: [
+          { name: regex },
+          { description: regex },
+          { shortDescription: regex },
+          { category: regex },
+          { tags: { $in: [new RegExp(escaped, 'i')] } },
+          { sku: regex },
+        ]
+      });
     }
 
-    // Apply optional filters (case-insensitive)
-    if (category) query.category = { $regex: new RegExp(category, 'i') };
-    if (brand) query.brand = { $regex: new RegExp(brand, 'i') };
+    // Category condition
+    if (category) {
+      andConditions.push({ category: { $regex: new RegExp(category, 'i') } });
+    }
+    
+    // Brand condition (checks both product.brand and product.company)
+    if (brand) {
+      const matchingCompanies = await Company.find({
+        name: { $regex: new RegExp(brand, 'i') }
+      }).select('_id');
+      const companyIds = matchingCompanies.map(c => c._id);
+      
+      andConditions.push({
+        $or: [
+          { brand: { $regex: new RegExp(brand, 'i') } },
+          { company: { $in: companyIds } }
+        ]
+      });
+    }
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
 
     console.log('Final search query:', JSON.stringify(query));
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name nameHindi slug shortDescription category mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax')
+        .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company')
+        .populate('company', 'name')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -312,6 +351,7 @@ exports.searchProducts = async (req, res, next) => {
         slug: p.slug,
         shortDescription: p.shortDescription,
         category: p.category,
+        brand: p.brand || p.company?.name || '',
         ...pricing,
         stock: p.stock,
         inStock: p.stock > 0,
@@ -444,7 +484,6 @@ exports.getRelatedProducts = async (req, res, next) => {
       productQuery.slug = id;
     }
 
-    const { Product } = require('../models');
     const currentProduct = await Product.findOne(productQuery).select('category _id');
     if (!currentProduct) return res.json({ success: true, data: [] });
 
@@ -453,7 +492,8 @@ exports.getRelatedProducts = async (req, res, next) => {
       category: currentProduct.category,
       _id: { $ne: currentProduct._id }
     })
-      .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images rating isFeatured isHot isNew purchaseCountMin purchaseCountMax')
+      .select('name nameHindi slug shortDescription category brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images rating isFeatured isHot isNew purchaseCountMin purchaseCountMax company')
+      .populate('company', 'name')
       .limit(limit)
       .lean();
 
@@ -468,7 +508,7 @@ exports.getRelatedProducts = async (req, res, next) => {
         slug: p.slug,
         shortDescription: p.shortDescription,
         category: p.category,
-        brand: p.brand || '',
+        brand: p.brand || p.company?.name || '',
         ...pricing,
         stock: p.stock,
         inStock: p.stock > 0,

@@ -9,6 +9,7 @@ const { updateProductCount } = require('../categoryController');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const slugify = require('slugify');
+const { encode } = require('blurhash');
 
 async function uploadFilesToFirebase(files, folder = 'products') {
   const bucket = getStorage();
@@ -35,7 +36,22 @@ async function uploadFilesToFirebase(files, folder = 'products') {
 
     await fileUpload.makePublic();
     const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`;
-    results.push({ url: publicUrl, publicId: filename });
+
+    // Generate BlurHash for preview
+    let blurHash = null;
+    try {
+      const { data: pixels, info: { width, height } } = await sharp(file.buffer)
+        .raw()
+        .ensureAlpha()
+        .resize(32, 32, { fit: 'inside' })
+        .toBuffer({ resolveWithObject: true });
+      
+      blurHash = encode(new Uint8ClampedArray(pixels), width, height, 4, 4);
+    } catch (err) {
+      console.error('Error generating blurhash:', err);
+    }
+
+    results.push({ url: publicUrl, publicId: filename, blurHash });
   }
   return results;
 }

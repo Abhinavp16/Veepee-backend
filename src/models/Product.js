@@ -98,6 +98,7 @@ const productSchema = new mongoose.Schema({
   images: [{
     url: { type: String, required: true },
     publicId: { type: String, required: true },
+    blurHash: { type: String, default: null },
     isPrimary: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
   }],
@@ -210,6 +211,11 @@ productSchema.virtual('isLowStock').get(function () {
 productSchema.virtual('primaryImage').get(function () {
   const primary = this.images.find(img => img.isPrimary);
   return primary ? primary.url : (this.images[0]?.url || null);
+});
+
+productSchema.virtual('primaryBlurHash').get(function () {
+  const primary = this.images.find(img => img.isPrimary);
+  return primary ? primary.blurHash : (this.images[0]?.blurHash || null);
 });
 
 productSchema.set('toJSON', { virtuals: true });

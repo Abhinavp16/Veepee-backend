@@ -21,6 +21,7 @@ const categorySchema = new mongoose.Schema({
   image: {
     url: { type: String, default: null },
     publicId: { type: String, default: null },
+    blurHash: { type: String, default: null },
   },
   parent: {
     type: mongoose.Schema.Types.ObjectId,

@@ -29,6 +29,10 @@ const companyValidation = {
 
 // Public routes
 router.get('/', companyController.getAllCompanies);
+router.get('/:companyId/categories', protect, authorize('admin', 'staff'), companyController.getCompanyCategories);
+router.post('/:companyId/categories', protect, authorize('admin', 'staff'), companyController.createCompanyCategory);
+router.put('/:companyId/categories/:categoryId', protect, authorize('admin', 'staff'), companyController.linkCompanyCategory);
+router.delete('/:companyId/categories/:categoryId', protect, authorize('admin'), companyController.unlinkCompanyCategory);
 router.get('/:id', companyController.getCompanyById);
 router.get('/:id/products', companyController.getCompanyProducts);
 

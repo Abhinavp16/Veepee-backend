@@ -1,12 +1,18 @@
 const mongoose = require('mongoose');
 const Category = require('../models/Category');
 const Product = require('../models/Product');
+const Company = require('../models/Company');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS } = require('../utils/constants');
 const { categoryProductCondition, escapeRegExp, normalizeObjectIds } = require('../utils/categoryHelpers');
-
-const parentFilter = (parentId) => ({ parent: parentId || null });
-const idString = (value) => value == null ? null : String(value);
+const {
+  createGlobalCategory,
+  idString,
+  normalizeSiblingOrders,
+  parentFilter,
+  parsePosition,
+  validateParent,
+} = require('../services/categoryService');
 
 async function getCategoryProductSets(categories, status = PRODUCT_STATUS.ACTIVE) {
   if (categories.length === 0) return new Map();
@@ -68,40 +74,6 @@ async function getRecursiveProductCounts(categories) {
     const categoryId = String(category._id);
     return [categoryId, collect(categoryId).size];
   }));
-}
-
-async function normalizeSiblingOrders(parentId) {
-  const siblings = await Category.find(parentFilter(parentId))
-    .sort({ order: 1, name: 1, _id: 1 })
-    .select('_id order')
-    .lean();
-  const operations = siblings.flatMap((category, index) => {
-    const order = index + 1;
-    return category.order === order ? [] : [{
-      updateOne: { filter: { _id: category._id }, update: { $set: { order } } },
-    }];
-  });
-  if (operations.length > 0) await Category.bulkWrite(operations);
-}
-
-async function validateParent(categoryId, parentId) {
-  if (!parentId) return true;
-  if (!mongoose.Types.ObjectId.isValid(parentId)) return false;
-  if (String(parentId) === String(categoryId)) return false;
-
-  let parent = await Category.findById(parentId).select('_id parent').lean();
-  if (!parent) return false;
-  while (parent?.parent) {
-    if (String(parent.parent) === String(categoryId)) return false;
-    parent = await Category.findById(parent.parent).select('_id parent').lean();
-  }
-  return true;
-}
-
-function parsePosition(value, fallback) {
-  const position = Number(value === undefined || value === null || value === '' ? fallback : value);
-  if (!Number.isInteger(position) || position < 1) return null;
-  return position;
 }
 
 exports.getCategories = async (req, res, next) => {
@@ -172,36 +144,7 @@ exports.getCategory = async (req, res, next) => {
 
 exports.createCategory = async (req, res, next) => {
   try {
-    const { name, description, image, parent, order, position: suppliedPosition, isActive } = req.body;
-    const existingCategory = await Category.findOne({
-      name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' },
-    });
-    if (existingCategory) return res.status(400).json({ success: false, message: 'Category with this name already exists' });
-
-    if (parent && !await validateParent(null, parent)) {
-      return res.status(400).json({ success: false, message: 'Parent category not found' });
-    }
-    await normalizeSiblingOrders(parent);
-    const siblingCount = await Category.countDocuments(parentFilter(parent));
-    const requestedPosition = parsePosition(order ?? suppliedPosition, siblingCount + 1);
-    if (requestedPosition === null) {
-      return res.status(400).json({ success: false, message: 'Order must be an integer of at least 1' });
-    }
-    const position = Math.min(requestedPosition, siblingCount + 1);
-    await Category.updateMany(
-      { ...parentFilter(parent), order: { $gte: position } },
-      { $inc: { order: 1 } }
-    );
-    const category = await Category.create({
-      name,
-      description,
-      image,
-      parent: parent || null,
-      order: position,
-      isActive: isActive !== undefined ? isActive : true,
-    });
-    await normalizeSiblingOrders(parent);
-    const createdCategory = await Category.findById(category._id).populate('parent', 'name slug');
+    const createdCategory = await createGlobalCategory(req.body);
     res.status(201).json({ success: true, data: createdCategory });
   } catch (error) {
     next(error);
@@ -307,6 +250,14 @@ exports.deleteCategory = async (req, res, next) => {
   try {
     let category = await Category.findById(req.params.id);
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
+    const companies = await Company.countDocuments({ categoryIds: category._id });
+    if (companies > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot delete category linked to ${companies} company or companies. Unlink it first.`,
+        error: { code: 'CATEGORY_LINKED_TO_COMPANIES', count: companies },
+      });
+    }
     if (await Category.exists({ parent: category._id })) {
       return res.status(400).json({ success: false, message: 'Cannot delete category with subcategories. Delete subcategories first.' });
     }

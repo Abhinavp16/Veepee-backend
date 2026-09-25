@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Product, StockLog, WebsiteSettings, Category } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse, generateSKU } = require('../../utils/helpers');
@@ -13,8 +14,10 @@ const { encode } = require('blurhash');
 const {
   categoryProductCondition,
   escapeRegExp,
+  getCategoryAndDescendantsById,
   productCategoryPopulate,
   resolveCategoryAssignment,
+  validateCompanyCategoryAssignment,
 } = require('../../utils/categoryHelpers');
 
 async function uploadFilesToFirebase(files, folder = 'products') {
@@ -124,18 +127,30 @@ async function normalizeProductLabelIds(labelIds = []) {
 
 exports.getProducts = async (req, res, next) => {
   try {
-    const { status, category, categoryId, search, sort } = req.query;
+    const { status, category, categoryId, companyId, includeDescendants, search, sort } = req.query;
     // Category-scoped Price Management lists are always paged at exactly 20 items.
     const { page, limit, skip } = paginate(req.query.page, categoryId ? 20 : req.query.limit, categoryId ? 20 : 50);
 
     const query = {};
     if (status) query.status = status;
-    if (categoryId) {
-      const categoryDocument = await Category.findById(categoryId).select('_id slug').lean();
-      if (!categoryDocument) {
-        throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+    if (companyId) {
+      if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        throw new BadRequestError('companyId must be a valid ID', 'INVALID_COMPANY_ID');
       }
-      query.$and = [categoryProductCondition(categoryDocument)];
+      query.company = companyId;
+    }
+    if (categoryId) {
+      if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+        throw new BadRequestError('categoryId must be a valid ID', 'INVALID_CATEGORY_ID');
+      }
+      if (includeDescendants !== undefined && !['true', 'false'].includes(String(includeDescendants))) {
+        throw new BadRequestError('includeDescendants must be true or false', 'INVALID_INCLUDE_DESCENDANTS');
+      }
+      const categories = includeDescendants === 'true'
+        ? await getCategoryAndDescendantsById(categoryId, { activeOnly: false })
+        : [await Category.findById(categoryId).select('_id slug').lean()];
+      if (!categories[0]) throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+      query.$and = [categoryProductCondition(categories)];
       // Price management only works with products that can still be managed.
       if (!status) query.status = { $ne: PRODUCT_STATUS.ARCHIVED };
     } else if (category) {
@@ -204,6 +219,10 @@ exports.createProduct = async (req, res, next) => {
     const productData = { ...req.body };
 
     const assignment = await resolveCategoryAssignment(productData);
+    await validateCompanyCategoryAssignment(productData, null, assignment);
+    if (Object.prototype.hasOwnProperty.call(productData, 'company') && !String(productData.company || '').trim()) {
+      productData.company = null;
+    }
     productData.categoryIds = assignment.categoryIds;
     productData.primaryCategoryId = assignment.primaryCategoryId;
     productData.category = assignment.category;
@@ -261,10 +280,14 @@ exports.updateProduct = async (req, res, next) => {
     const updateData = { ...req.body };
 
     const assignment = await resolveCategoryAssignment(updateData, product);
+    await validateCompanyCategoryAssignment(updateData, product, assignment);
     if (assignment) {
       updateData.categoryIds = assignment.categoryIds;
       updateData.primaryCategoryId = assignment.primaryCategoryId;
       updateData.category = assignment.category;
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'company') && !String(updateData.company || '').trim()) {
+      updateData.company = null;
     }
 
     if (updateData.name && updateData.name !== product.name) {

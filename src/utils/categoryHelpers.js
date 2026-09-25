@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Category = require('../models/Category');
+const Company = require('../models/Company');
 const { BadRequestError, NotFoundError } = require('./errors');
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -73,6 +74,30 @@ async function getCategoryAndDescendants(slug, { activeOnly = true } = {}) {
   return categories;
 }
 
+async function getCategoryAndDescendantsById(categoryId, { activeOnly = false } = {}) {
+  if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+    throw new BadRequestError('categoryId must be a valid ID', 'INVALID_CATEGORY_ID');
+  }
+  const root = await Category.findOne({
+    _id: categoryId,
+    ...(activeOnly ? { isActive: true } : {}),
+  }).select('_id slug parent name isActive').lean();
+  if (!root) throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+
+  const categories = [root];
+  let parentIds = [root._id];
+  while (parentIds.length > 0) {
+    const children = await Category.find({
+      parent: { $in: parentIds },
+      ...(activeOnly ? { isActive: true } : {}),
+    }).select('_id slug parent name isActive').lean();
+    if (children.length === 0) break;
+    categories.push(...children);
+    parentIds = children.map((category) => category._id);
+  }
+  return categories;
+}
+
 async function resolveCategoryAssignment(input, existingProduct = null) {
   const categoryFieldsPresent = ['categoryIds', 'primaryCategoryId', 'category']
     .some((field) => hasOwn(input, field));
@@ -126,6 +151,53 @@ async function resolveCategoryAssignment(input, existingProduct = null) {
   };
 }
 
+async function validateCompanyCategoryAssignment(input, existingProduct = null, categoryAssignment = null) {
+  const suppliedCompany = hasOwn(input, 'company');
+  const effectiveCompanyId = suppliedCompany ? input.company : existingProduct?.company;
+  if (effectiveCompanyId === undefined || effectiveCompanyId === null || String(effectiveCompanyId).trim() === '') {
+    return null;
+  }
+  if (!mongoose.Types.ObjectId.isValid(effectiveCompanyId)) {
+    throw new BadRequestError('company must be a valid company ID', 'INVALID_COMPANY_ID');
+  }
+
+  const company = await Company.findById(effectiveCompanyId).select('_id isActive categoryIds').lean();
+  if (!company) throw new BadRequestError('Assigned company does not exist', 'INVALID_COMPANY_ASSIGNMENT');
+
+  const previousCompanyId = existingProduct?.company ? String(existingProduct.company) : null;
+  const isNewAssignment = !existingProduct || (suppliedCompany && String(effectiveCompanyId) !== previousCompanyId);
+  if (isNewAssignment && !company.isActive) {
+    throw new BadRequestError('Assigned company must be active', 'INACTIVE_COMPANY_ASSIGNMENT');
+  }
+
+  let effectiveCategoryIds = categoryAssignment?.categoryIds?.map(String)
+    || (existingProduct?.categoryIds || []).map(String);
+  if (effectiveCategoryIds.length === 0 && existingProduct?.category) {
+    const legacyCategory = await Category.findOne({
+      slug: String(existingProduct.category).trim().toLowerCase(),
+    }).select('_id').lean();
+    if (legacyCategory) effectiveCategoryIds = [String(legacyCategory._id)];
+  }
+  if (effectiveCategoryIds.length === 0) {
+    throw new BadRequestError(
+      'Product categories could not be resolved for the assigned company',
+      'INVALID_CATEGORY_ASSIGNMENT'
+    );
+  }
+
+  const linkedIds = new Set((company.categoryIds || []).map(String));
+  const unlinkedCategoryIds = effectiveCategoryIds.filter((id) => !linkedIds.has(id));
+  if (unlinkedCategoryIds.length > 0) {
+    const error = new BadRequestError(
+      'All product categories must be linked to the assigned company',
+      'COMPANY_CATEGORY_NOT_LINKED'
+    );
+    error.details = { companyId: String(company._id), categoryIds: unlinkedCategoryIds };
+    throw error;
+  }
+  return company;
+}
+
 const productCategoryPopulate = [
   { path: 'categoryIds', select: 'name slug description image parent order isActive' },
   { path: 'primaryCategoryId', select: 'name slug description image parent order isActive' },
@@ -135,9 +207,11 @@ module.exports = {
   categoryProductCondition,
   escapeRegExp,
   getCategoryAndDescendants,
+  getCategoryAndDescendantsById,
   legacyFallbackCondition,
   normalizeObjectIds,
   productCategoryPopulate,
   resolveCategoryAssignment,
+  validateCompanyCategoryAssignment,
   toIdArray,
 };

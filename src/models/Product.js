@@ -211,6 +211,8 @@ productSchema.index({ sku: 1 }, { unique: true });
 productSchema.index({ category: 1, status: 1 });
 productSchema.index({ categoryIds: 1, status: 1 });
 productSchema.index({ primaryCategoryId: 1, status: 1 });
+productSchema.index({ company: 1, categoryIds: 1, status: 1 });
+productSchema.index({ company: 1, category: 1, status: 1 });
 productSchema.index({ status: 1, isFeatured: -1 });
 productSchema.index({ retailPrice: 1 });
 productSchema.index({ wholesalePrice: 1 });

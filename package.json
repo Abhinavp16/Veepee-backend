@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "worker:prices": "node src/priceWorker.js",
     "migrate:product-categories": "node scripts/migrateProductCategories.js",
+    "migrate:company-categories": "node scripts/migrateCompanyCategories.js",
     "seed": "node src/scripts/seed.js",
     "seed:admin": "node src/scripts/seedAdmin.js",
     "test": "node tests/inventory.test.js"

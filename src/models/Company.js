@@ -35,6 +35,14 @@ const companySchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  categoryIds: {
+    type: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
+    }],
+    default: [],
+    set: (values) => [...new Map((values || []).map((value) => [String(value), value])).values()],
+  },
 }, {
   timestamps: true,
 });
@@ -42,6 +50,7 @@ const companySchema = new mongoose.Schema({
 companySchema.index({ slug: 1 }, { unique: true });
 companySchema.index({ name: 1 }, { unique: true });
 companySchema.index({ isActive: 1 });
+companySchema.index({ categoryIds: 1 });
 
 companySchema.pre('save', function (next) {
   if (this.isModified('name') || !this.slug) {

@@ -2,6 +2,7 @@ const { Order, Payment, Product, StockLog } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { ORDER_STATUS } = require('../../utils/constants');
+const notificationService = require('../../services/notificationService');
 
 exports.getOrders = async (req, res, next) => {
   try {
@@ -167,7 +168,11 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     await order.save();
 
-    // TODO: Send notification to customer
+    try {
+      await notificationService.sendOrderStatusUpdate(order.userId, order._id, order.status);
+    } catch (notificationError) {
+      console.error(`Failed to notify customer about order ${order._id} status update:`, notificationError);
+    }
 
     res.json({
       success: true,
@@ -202,7 +207,11 @@ exports.shipOrder = async (req, res, next) => {
 
     await order.save();
 
-    // TODO: Send notification to customer
+    try {
+      await notificationService.sendOrderStatusUpdate(order.userId, order._id, ORDER_STATUS.SHIPPED);
+    } catch (notificationError) {
+      console.error(`Failed to notify customer about shipment for order ${order._id}:`, notificationError);
+    }
 
     res.json({
       success: true,

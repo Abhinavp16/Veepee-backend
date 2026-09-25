@@ -29,8 +29,12 @@ const generateSKU = (category, name) => {
 };
 
 const paginate = (page = 1, limit = 20, maxLimit = 50) => {
-  const pageNum = Math.max(1, parseInt(page));
-  const limitNum = Math.min(Math.max(1, parseInt(limit)), maxLimit);
+  const parsedPage = parseInt(page, 10);
+  const parsedLimit = parseInt(limit, 10);
+  const pageNum = Number.isFinite(parsedPage) ? Math.max(1, parsedPage) : 1;
+  const limitNum = Number.isFinite(parsedLimit)
+    ? Math.min(Math.max(1, parsedLimit), maxLimit)
+    : Math.min(20, maxLimit);
   const skip = (pageNum - 1) * limitNum;
 
   return { page: pageNum, limit: limitNum, skip };

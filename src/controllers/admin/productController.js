@@ -1,4 +1,4 @@
-const { Product, StockLog, WebsiteSettings } = require('../../models');
+const { Product, StockLog, WebsiteSettings, Category } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse, generateSKU } = require('../../utils/helpers');
 const { deleteImage } = require('../../config/cloudinary');
@@ -10,6 +10,12 @@ const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const slugify = require('slugify');
 const { encode } = require('blurhash');
+const {
+  categoryProductCondition,
+  escapeRegExp,
+  productCategoryPopulate,
+  resolveCategoryAssignment,
+} = require('../../utils/categoryHelpers');
 
 async function uploadFilesToFirebase(files, folder = 'products') {
   const bucket = getStorage();
@@ -118,33 +124,59 @@ async function normalizeProductLabelIds(labelIds = []) {
 
 exports.getProducts = async (req, res, next) => {
   try {
-    const { status, category, search, sort } = req.query;
-    const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+    const { status, category, categoryId, search, sort } = req.query;
+    // Category-scoped Price Management lists are always paged at exactly 20 items.
+    const { page, limit, skip } = paginate(req.query.page, categoryId ? 20 : req.query.limit, categoryId ? 20 : 50);
 
     const query = {};
     if (status) query.status = status;
-    if (category) query.category = category;
+    if (categoryId) {
+      const categoryDocument = await Category.findById(categoryId).select('_id slug').lean();
+      if (!categoryDocument) {
+        throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+      }
+      query.$and = [categoryProductCondition(categoryDocument)];
+      // Price management only works with products that can still be managed.
+      if (!status) query.status = { $ne: PRODUCT_STATUS.ARCHIVED };
+    } else if (category) {
+      const categoryDocument = await Category.findOne({ slug: String(category).trim().toLowerCase() })
+        .select('_id slug')
+        .lean();
+      if (categoryDocument) {
+        query.$and = [categoryProductCondition(categoryDocument)];
+      } else {
+        query.category = { $regex: `^${escapeRegExp(category)}$`, $options: 'i' };
+      }
+    }
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } },
-      ];
+      const regex = { $regex: escapeRegExp(String(search).slice(0, 200)), $options: 'i' };
+      query.$and = [...(query.$and || []), { $or: [{ name: regex }, { sku: regex }] }];
     }
 
-    let sortOption = { createdAt: -1 };
+    let sortOption = { createdAt: -1, _id: -1 };
     if (sort) {
       const [field, order] = sort.split(':');
-      sortOption = { [field]: order === 'asc' ? 1 : -1 };
+      const allowedSortFields = new Set(['name', 'sku', 'category', 'status', 'stock', 'createdAt', 'retailPrice', 'wholesalePrice']);
+      if (allowedSortFields.has(field)) sortOption = { [field]: order === 'asc' ? 1 : -1, _id: 1 };
     }
 
     const [products, total] = await Promise.all([
-      Product.find(query).sort(sortOption).skip(skip).limit(limit).lean(),
+      Product.find(query)
+        .populate(productCategoryPopulate)
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
       Product.countDocuments(query),
     ]);
 
     res.json({
       success: true,
-      ...formatPaginationResponse(products, total, page, limit),
+      ...formatPaginationResponse(products.map((product) => ({
+        ...product,
+        categories: product.categoryIds || [],
+        primaryCategory: product.primaryCategoryId || null,
+      })), total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -153,7 +185,7 @@ exports.getProducts = async (req, res, next) => {
 
 exports.getProductById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const product = await Product.findById(req.params.id).populate(productCategoryPopulate);
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
@@ -170,6 +202,11 @@ exports.getProductById = async (req, res, next) => {
 exports.createProduct = async (req, res, next) => {
   try {
     const productData = { ...req.body };
+
+    const assignment = await resolveCategoryAssignment(productData);
+    productData.categoryIds = assignment.categoryIds;
+    productData.primaryCategoryId = assignment.primaryCategoryId;
+    productData.category = assignment.category;
 
     if (!productData.sku) {
       productData.sku = generateSKU(productData.category, productData.name);
@@ -197,10 +234,9 @@ exports.createProduct = async (req, res, next) => {
       productData.labelIds = await normalizeProductLabelIds(productData.labelIds);
     }
 
-    const product = await Product.create(productData);
-    if (product.category) {
-      await updateProductCount(product.category);
-    }
+    let product = await Product.create(productData);
+    await updateProductCount(assignment.categoryIds);
+    product = await product.populate(productCategoryPopulate);
 
     res.status(201).json({
       success: true,
@@ -219,8 +255,17 @@ exports.updateProduct = async (req, res, next) => {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
-    const previousCategory = product.category;
+    const previousCategories = product.categoryIds?.length
+      ? product.categoryIds.map(String)
+      : [product.category].filter(Boolean);
     const updateData = { ...req.body };
+
+    const assignment = await resolveCategoryAssignment(updateData, product);
+    if (assignment) {
+      updateData.categoryIds = assignment.categoryIds;
+      updateData.primaryCategoryId = assignment.primaryCategoryId;
+      updateData.category = assignment.category;
+    }
 
     if (updateData.name && updateData.name !== product.name) {
       updateData.slug = slugify(updateData.name, { lower: true, strict: true });
@@ -249,11 +294,11 @@ exports.updateProduct = async (req, res, next) => {
 
     Object.assign(product, updateData);
     await product.save();
-    await Promise.all(
-      [...new Set([previousCategory, product.category].filter(Boolean))].map((categorySlug) =>
-        updateProductCount(categorySlug)
-      )
-    );
+    await updateProductCount([
+      ...previousCategories,
+      ...(product.categoryIds?.length ? product.categoryIds.map(String) : [product.category]),
+    ]);
+    await product.populate(productCategoryPopulate);
 
     res.json({
       success: true,
@@ -272,12 +317,12 @@ exports.deleteProduct = async (req, res, next) => {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
-    const previousCategory = product.category;
+    const previousCategories = product.categoryIds?.length
+      ? product.categoryIds.map(String)
+      : [product.category].filter(Boolean);
     product.status = 'archived';
     await product.save();
-    if (previousCategory) {
-      await updateProductCount(previousCategory);
-    }
+    await updateProductCount(previousCategories);
 
     res.json({
       success: true,
@@ -302,14 +347,22 @@ exports.updateStock = async (req, res, next) => {
     let action;
     let quantityChange;
 
+    const parseSafeInteger = (value, field) => {
+      const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+      if (!Number.isSafeInteger(parsed)) {
+        throw new BadRequestError(`${field} must be a safe integer`, 'INVALID_STOCK_VALUE');
+      }
+      return parsed;
+    };
+
     if (stock !== undefined) {
       // Absolute set
-      newStock = Math.max(0, parseInt(stock));
+      newStock = Math.max(0, parseSafeInteger(stock, 'Stock'));
       quantityChange = newStock - previousStock;
       action = 'manual_set';
-    } else if (adjustment) {
+    } else if (adjustment !== undefined) {
       // Relative adjustment (+N or -N)
-      const adjustmentValue = parseInt(adjustment);
+      const adjustmentValue = parseSafeInteger(adjustment, 'Adjustment');
       newStock = previousStock + adjustmentValue;
       if (newStock < 0) {
         throw new BadRequestError(
@@ -321,6 +374,10 @@ exports.updateStock = async (req, res, next) => {
       action = 'manual_adjust';
     } else {
       throw new BadRequestError('Provide stock or adjustment', 'MISSING_STOCK_PARAM');
+    }
+
+    if (!Number.isSafeInteger(newStock) || newStock < 0) {
+      throw new BadRequestError('Resulting stock must be a safe non-negative integer', 'INVALID_STOCK_VALUE');
     }
 
     // Atomic update with guard for adjustments

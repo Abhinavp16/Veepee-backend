@@ -3,6 +3,7 @@ module.exports = {
     BUYER: 'buyer',
     WHOLESALER: 'wholesaler',
     ADMIN: 'admin',
+    STAFF: 'staff',
   },
 
   AUTH_PROVIDERS: {

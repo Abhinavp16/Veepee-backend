@@ -33,6 +33,17 @@ const productSchema = new mongoose.Schema({
     required: [true, 'Category is required'],
     index: true,
   },
+  // Optional at schema level until legacy records have been migrated. Product
+  // write APIs enforce both fields for every new or changed assignment.
+  categoryIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+  }],
+  primaryCategoryId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    default: null,
+  },
   brand: {
     type: String,
     default: '',
@@ -61,6 +72,17 @@ const productSchema = new mongoose.Schema({
     type: Number,
     required: [true, 'Wholesale price is required'],
     min: [0, 'Wholesale price cannot be negative'],
+  },
+  // Pending price changes are deliberately stored as direct fields so reads and
+  // worker updates cannot accidentally merge a replacement request.
+  pendingRetailPrice: { type: Number, min: [0, 'Pending retail price cannot be negative'], default: null },
+  pendingWholesalePrice: { type: Number, min: [0, 'Pending wholesale price cannot be negative'], default: null },
+  priceChangeScheduledAt: { type: Date, default: null },
+  priceChangeEffectiveAt: { type: Date, default: null },
+  activePendingPriceChangeAudit: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PriceChangeAudit',
+    default: null,
   },
 
   // Bulk/Wholesale settings
@@ -187,6 +209,8 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ slug: 1 }, { unique: true });
 productSchema.index({ sku: 1 }, { unique: true });
 productSchema.index({ category: 1, status: 1 });
+productSchema.index({ categoryIds: 1, status: 1 });
+productSchema.index({ primaryCategoryId: 1, status: 1 });
 productSchema.index({ status: 1, isFeatured: -1 });
 productSchema.index({ retailPrice: 1 });
 productSchema.index({ wholesalePrice: 1 });
@@ -216,6 +240,14 @@ productSchema.virtual('primaryImage').get(function () {
 productSchema.virtual('primaryBlurHash').get(function () {
   const primary = this.images.find(img => img.isPrimary);
   return primary ? primary.blurHash : (this.images[0]?.blurHash || null);
+});
+
+productSchema.virtual('categories').get(function () {
+  return this.categoryIds || [];
+});
+
+productSchema.virtual('primaryCategory').get(function () {
+  return this.primaryCategoryId || null;
 });
 
 productSchema.set('toJSON', { virtuals: true });

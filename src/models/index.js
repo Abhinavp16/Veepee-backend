@@ -16,6 +16,8 @@ const AffiliateCode = require('./AffiliateCode');
 const AffiliateCommission = require('./AffiliateCommission');
 const Review = require('./Review');
 const WebsiteSettings = require('./WebsiteSettings');
+const Category = require('./Category');
+const PriceChangeAudit = require('./PriceChangeAudit');
 
 module.exports = {
   User,
@@ -36,4 +38,6 @@ module.exports = {
   AffiliateCommission,
   Review,
   WebsiteSettings,
+  Category,
+  PriceChangeAudit,
 };

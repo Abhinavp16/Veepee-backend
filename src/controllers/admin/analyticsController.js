@@ -1,5 +1,5 @@
 const { Order, Product, Negotiation, User, Analytics, Payment } = require('../../models');
-const { ORDER_STATUS, PAYMENT_STATUS, NEGOTIATION_STATUS, PRODUCT_STATUS } = require('../../utils/constants');
+const { ORDER_STATUS, PAYMENT_STATUS, NEGOTIATION_STATUS, PRODUCT_STATUS, USER_ROLES } = require('../../utils/constants');
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
@@ -40,7 +40,7 @@ exports.getDashboardStats = async (req, res, next) => {
       ]),
       Product.countDocuments({ status: PRODUCT_STATUS.ACTIVE, $expr: { $lte: ['$stock', '$lowStockThreshold'] }, stock: { $gt: 0 } }),
       Product.countDocuments({ status: PRODUCT_STATUS.ACTIVE }),
-      User.countDocuments({ role: { $ne: 'admin' }, isActive: true }),
+      User.countDocuments({ role: { $in: [USER_ROLES.BUYER, USER_ROLES.WHOLESALER] }, isActive: true }),
     ]);
 
     res.json({

@@ -2,14 +2,18 @@ const { User, Order, Negotiation, DeviceToken, Notification } = require('../../m
 const notificationService = require('../../services/notificationService');
 const { NotFoundError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
+const { USER_ROLES } = require('../../utils/constants');
+
+const customerRoles = [USER_ROLES.BUYER, USER_ROLES.WHOLESALER];
+const customerQuery = { role: { $in: customerRoles } };
 
 exports.getCustomers = async (req, res, next) => {
   try {
     const { role, search } = req.query;
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
 
-    const query = { role: { $ne: 'admin' } };
-    if (role) query.role = role;
+    const query = { ...customerQuery };
+    if (customerRoles.includes(role)) query.role = role;
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -40,9 +44,9 @@ exports.getCustomers = async (req, res, next) => {
 
 exports.getCustomerById = async (req, res, next) => {
   try {
-    const customer = await User.findById(req.params.id).select('-fcmTokens');
+    const customer = await User.findOne({ _id: req.params.id, ...customerQuery }).select('-fcmTokens');
 
-    if (!customer || customer.role === 'admin') {
+    if (!customer) {
       throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
     }
 
@@ -97,9 +101,9 @@ exports.upgradeCustomer = async (req, res, next) => {
     const { id } = req.params;
     const { action } = req.body;
 
-    const customer = await User.findById(id);
+    const customer = await User.findOne({ _id: id, ...customerQuery });
 
-    if (!customer || customer.role === 'admin') {
+    if (!customer) {
       throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
     }
 

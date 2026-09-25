@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const productController = require('../controllers/productController');
-const { optionalAuth } = require('../middlewares/auth');
+const { optionalAuth, protect, authorize } = require('../middlewares/auth');
 const validate = require('../middlewares/validate');
 const { productValidation } = require('../validations');
 
@@ -13,6 +13,6 @@ router.get('/:id/related', optionalAuth, productController.getRelatedProducts);
 router.get('/:slug', optionalAuth, productController.getProductBySlug);
 router.post('/:id/view', optionalAuth, productController.trackProductView);
 router.post('/:id/event', optionalAuth, productController.trackProductEvent);
-router.patch('/:id/hindi-name', productController.updateProductNameHindi);
+router.patch('/:id/hindi-name', protect, authorize('admin'), productController.updateProductNameHindi);
 
 module.exports = router;

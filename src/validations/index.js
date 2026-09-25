@@ -1,5 +1,11 @@
 const Joi = require('joi');
 
+const objectId = Joi.string().pattern(/^[0-9a-fA-F]{24}$/);
+const categoryIds = Joi.alternatives().try(
+  Joi.array().items(objectId).min(1),
+  Joi.string().trim().min(1)
+);
+
 const discountRuleSchema = Joi.object({
   minPurchaseAmount: Joi.number().min(0).required(),
   discountType: Joi.string().valid('percentage', 'fixed').required(),
@@ -93,21 +99,25 @@ const productValidation = {
   list: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
-    category: Joi.string().allow('', null),
-    brand: Joi.string().allow('', null),
+    category: Joi.string().max(100).allow('', null),
+    categorySlug: Joi.string().trim().lowercase().max(100).allow('', null),
+    brand: Joi.string().max(200).allow('', null),
     minPrice: Joi.number().min(0),
     maxPrice: Joi.number().min(0),
     inStock: Joi.boolean(),
     featured: Joi.boolean(),
+    isFeatured: Joi.boolean(),
+    isHot: Joi.boolean(),
     sort: Joi.string().valid('price', '-price', 'name', '-name', 'createdAt', '-createdAt'),
   }),
 
   search: Joi.object({
-    q: Joi.string().allow('', null),
+    q: Joi.string().max(200).allow('', null),
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
-    category: Joi.string().allow('', null),
-    brand: Joi.string().allow('', null),
+    category: Joi.string().max(100).allow('', null),
+    categorySlug: Joi.string().trim().lowercase().max(100).allow('', null),
+    brand: Joi.string().max(200).allow('', null),
   }),
 };
 
@@ -195,7 +205,9 @@ const adminValidation = {
     name: Joi.string().required().max(200),
     description: Joi.string().required(),
     shortDescription: Joi.string().max(300),
-    category: Joi.string().required(),
+    category: Joi.string(),
+    categoryIds,
+    primaryCategoryId: objectId,
     subCategory: Joi.string().allow('', null),
     tags: Joi.array().items(Joi.string()),
     // 3-Tier Pricing
@@ -227,19 +239,21 @@ const adminValidation = {
     company: Joi.string().allow('', null),
     videoUrl: Joi.string().allow('', null),
     shippingTerms: Joi.string().allow('', null),
-  }),
+  }).or('category', 'categoryIds'),
 
   updateProduct: Joi.object({
     name: Joi.string().max(200),
     description: Joi.string(),
     shortDescription: Joi.string().max(300),
     category: Joi.string(),
+    categoryIds,
+    primaryCategoryId: objectId.allow('', null),
     subCategory: Joi.string().allow('', null),
     tags: Joi.array().items(Joi.string()),
-    // 3-Tier Pricing
-    mrp: Joi.number().min(0),
-    retailPrice: Joi.number().min(0),
-    wholesalePrice: Joi.number().min(0),
+    // Live prices are changed only through the audited price-change endpoint.
+    mrp: Joi.forbidden(),
+    retailPrice: Joi.forbidden(),
+    wholesalePrice: Joi.forbidden(),
     minWholesaleQuantity: Joi.number().integer().min(1),
     negotiationEnabled: Joi.boolean(),
     stock: Joi.number().integer().min(0),
@@ -271,6 +285,42 @@ const adminValidation = {
     adjustment: Joi.string().pattern(/^[+-]\d+$/),
     reason: Joi.string().max(200),
   }).or('stock', 'adjustment'),
+
+  priceChange: Joi.object({
+    retailPrice: Joi.number().min(0),
+    wholesalePrice: Joi.number().min(0),
+    priceChangeMode: Joi.string().valid('immediate', 'schedule_24h', 'schedule_48h', 'custom').required(),
+    effectiveAt: Joi.when('priceChangeMode', {
+      is: 'custom',
+      then: Joi.string().isoDate().required(),
+      otherwise: Joi.forbidden(),
+    }),
+  }).or('retailPrice', 'wholesalePrice'),
+
+  createStaff: Joi.object({
+    name: Joi.string().trim().max(100).required(),
+    email: Joi.string().email().lowercase().required(),
+    phone: Joi.string().trim().min(10).max(20).allow('', null),
+    password: Joi.string().min(8).max(128).required(),
+  }),
+
+  updateStaff: Joi.object({
+    name: Joi.string().trim().max(100),
+    email: Joi.string().email().lowercase(),
+    phone: Joi.string().trim().min(10).max(20).allow('', null),
+    password: Joi.string().min(8).max(128),
+    isActive: Joi.boolean(),
+  }).or('name', 'email', 'phone', 'password', 'isActive'),
+
+  staffList: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(50).default(20),
+    search: Joi.string().trim().allow('', null),
+  }),
+
+  upgradeCustomer: Joi.object({
+    action: Joi.string().valid('accept', 'reject').required(),
+  }),
 
   counterNegotiation: Joi.object({
     pricePerUnit: Joi.number().min(0).required(),

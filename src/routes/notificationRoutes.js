@@ -3,17 +3,18 @@ const router = express.Router();
 const notificationController = require('../controllers/notificationController');
 const { protect, authorize } = require('../middlewares/auth');
 
-// User routes - register/unregister FCM tokens
-router.post('/register-token', protect, notificationController.registerFcmToken);
-router.post('/unregister-token', protect, notificationController.unregisterFcmToken);
+// User routes deliberately exclude operational Staff accounts.
+const customerOrAdmin = [protect, authorize('buyer', 'wholesaler', 'admin')];
+router.post('/register-token', ...customerOrAdmin, notificationController.registerFcmToken);
+router.post('/unregister-token', ...customerOrAdmin, notificationController.unregisterFcmToken);
 
 // Subscribe/unsubscribe to topics
-router.post('/subscribe', protect, notificationController.subscribeToTopic);
-router.post('/unsubscribe', protect, notificationController.unsubscribeFromTopic);
+router.post('/subscribe', ...customerOrAdmin, notificationController.subscribeToTopic);
+router.post('/unsubscribe', ...customerOrAdmin, notificationController.unsubscribeFromTopic);
 
 // User routes - get & manage notifications
-router.get('/my', protect, notificationController.getMyNotifications);
-router.post('/mark-read', protect, notificationController.markAsRead);
+router.get('/my', ...customerOrAdmin, notificationController.getMyNotifications);
+router.post('/mark-read', ...customerOrAdmin, notificationController.markAsRead);
 
 // Admin routes - send notifications
 router.post('/send-to-user', protect, authorize('admin'), notificationController.sendToUser);

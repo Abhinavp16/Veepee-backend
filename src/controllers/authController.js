@@ -363,20 +363,27 @@ exports.refreshToken = async (req, res, next) => {
 
     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
 
-    const storedToken = await RefreshToken.findOne({
-      token: refreshToken,
-      userId: decoded.userId,
-      isRevoked: false,
-    });
+    if (decoded.type !== 'refresh') {
+      throw new UnauthorizedError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
+    }
 
-    if (!storedToken) {
+    const [storedToken, user] = await Promise.all([
+      RefreshToken.findOne({
+        token: refreshToken,
+        userId: decoded.userId,
+        isRevoked: false,
+      }),
+      User.findOne({ _id: decoded.userId, isActive: true }).select('_id'),
+    ]);
+
+    if (!storedToken || !user) {
       throw new UnauthorizedError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
     }
 
     storedToken.isRevoked = true;
     await storedToken.save();
 
-    const tokens = await generateTokens(decoded.userId, req.headers['user-agent']);
+    const tokens = await generateTokens(user._id, req.headers['user-agent']);
 
     res.json({
       success: true,

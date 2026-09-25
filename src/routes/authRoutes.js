@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
-const { protect } = require('../middlewares/auth');
+const { protect, buyerOrWholesaler } = require('../middlewares/auth');
 const { uploadAvatar, uploadProductImages } = require('../config/cloudinary');
 const validate = require('../middlewares/validate');
 const { authValidation } = require('../validations');
@@ -20,8 +20,8 @@ router.post('/logout', protect, authController.logout);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
 router.post('/profile/avatar', protect, uploadAvatar.single('avatar'), authController.uploadProfileAvatar);
-router.post('/fcm-token', protect, validate(authValidation.fcmToken), authController.registerFcmToken);
-router.post('/convert-to-wholesaler', protect, uploadProductImages.array('proofImages', 3), validate(authValidation.convertWholesaler), authController.convertToWholesaler);
+router.post('/fcm-token', protect, buyerOrWholesaler, validate(authValidation.fcmToken), authController.registerFcmToken);
+router.post('/convert-to-wholesaler', protect, buyerOrWholesaler, uploadProductImages.array('proofImages', 3), validate(authValidation.convertWholesaler), authController.convertToWholesaler);
 
 module.exports = router;
 

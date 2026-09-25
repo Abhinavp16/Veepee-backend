@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const paymentController = require('../controllers/paymentController');
-const { protect } = require('../middlewares/auth');
+const { protect, authorize } = require('../middlewares/auth');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -19,6 +19,7 @@ const upload = multer({
 router.get('/upi-details', paymentController.getUpiDetails);
 
 router.use(protect);
+router.use(authorize('buyer', 'wholesaler', 'admin'));
 
 router.post(
   '/:orderId/upload',

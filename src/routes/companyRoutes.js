@@ -33,8 +33,8 @@ router.get('/:id', companyController.getCompanyById);
 router.get('/:id/products', companyController.getCompanyProducts);
 
 // Admin routes
-router.post('/', protect, authorize('admin'), validate(companyValidation.create), companyController.createCompany);
-router.put('/:id', protect, authorize('admin'), validate(companyValidation.update), companyController.updateCompany);
+router.post('/', protect, authorize('admin', 'staff'), validate(companyValidation.create), companyController.createCompany);
+router.put('/:id', protect, authorize('admin', 'staff'), validate(companyValidation.update), companyController.updateCompany);
 router.delete('/:id', protect, authorize('admin'), companyController.deleteCompany);
 
 module.exports = router;

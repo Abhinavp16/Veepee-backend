@@ -1,5 +1,13 @@
 const { getMessaging } = require('../config/firebase');
-const { DeviceToken, Notification } = require('../models');
+const { Cart, DeviceToken, Notification } = require('../models');
+
+function normalizeFcmData(data = {}) {
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([, value]) => value !== null && value !== undefined)
+      .map(([key, value]) => [key, value instanceof Date ? value.toISOString() : String(value)])
+  );
+}
 
 class NotificationService {
   constructor() {
@@ -29,13 +37,13 @@ class NotificationService {
           ...(notification.imageUrl && { imageUrl: notification.imageUrl }),
         },
         data: {
-          ...data,
+          ...normalizeFcmData(data),
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         android: {
           priority: 'high',
           notification: {
-            channelId: 'agrimart_default',
+            channelId: 'veepee_default',
             priority: 'high',
             defaultSound: true,
           },
@@ -83,13 +91,13 @@ class NotificationService {
           ...(notification.imageUrl && { imageUrl: notification.imageUrl }),
         },
         data: {
-          ...data,
+          ...normalizeFcmData(data),
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         android: {
           priority: 'high',
           notification: {
-            channelId: 'agrimart_default',
+            channelId: 'veepee_default',
             priority: 'high',
             defaultSound: true,
           },
@@ -175,7 +183,7 @@ class NotificationService {
           ...(notification.imageUrl && { imageUrl: notification.imageUrl }),
         },
         data: {
-          ...data,
+          ...normalizeFcmData(data),
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
       };
@@ -248,16 +256,59 @@ class NotificationService {
       cancelled: { title: 'Order Cancelled', body: 'Your order has been cancelled.' },
     };
 
-    const notification = statusMessages[status] || { 
-      title: 'Order Update', 
-      body: `Your order status has been updated to ${status}` 
+    const notification = statusMessages[status] || {
+      title: 'Order Update',
+      body: `Your order status has been updated to ${status}`,
     };
 
-    return this.sendToUser(userId, notification, { 
-      type: 'order_update', 
+    return this.sendToUser(userId, notification, {
+      type: 'order_update',
       orderId: orderId.toString(),
-      status 
+      status,
     });
+  }
+
+  async sendPriceChange(userId, priceChange) {
+    const {
+      productId,
+      productName,
+      previousRetailPrice,
+      retailPrice,
+      previousWholesalePrice,
+      wholesalePrice,
+    } = priceChange;
+    const customerPriceChanged = Number(previousRetailPrice) !== Number(retailPrice);
+    const body = customerPriceChanged
+      ? `${productName} is now ₹${retailPrice}.`
+      : `${productName} has an updated price.`;
+
+    return this.sendToUser(userId, {
+      title: 'Price Updated',
+      body,
+    }, {
+      type: 'price_change',
+      productId: productId.toString(),
+      previousRetailPrice,
+      retailPrice,
+      previousWholesalePrice,
+      wholesalePrice,
+    });
+  }
+
+  async notifyCartOwnersOfPriceChange(priceChange) {
+    const userIds = await Cart.distinct('userId', {
+      'items.productId': priceChange.productId,
+    });
+    if (userIds.length === 0) return { recipients: 0, failed: 0 };
+
+    const results = await Promise.allSettled(
+      userIds.map((userId) => this.sendPriceChange(userId, priceChange))
+    );
+    const failed = results.filter((result) => result.status === 'rejected').length;
+    if (failed > 0) {
+      console.error(`Failed to send ${failed} price-change notifications for product ${priceChange.productId}`);
+    }
+    return { recipients: userIds.length, failed };
   }
 
   async sendNegotiationUpdate(userId, negotiationId, message) {
@@ -273,7 +324,7 @@ class NotificationService {
   async sendNewProductAlert(productName, productId) {
     return this.sendToTopic('new_products', {
       title: 'New Product Available!',
-      body: `Check out ${productName} - now available on AgriMart`,
+      body: `Check out ${productName} - now available on OXON by Veepee`,
     }, {
       type: 'new_product',
       productId: productId.toString(),

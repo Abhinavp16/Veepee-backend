@@ -30,7 +30,8 @@ const categorySchema = new mongoose.Schema({
   },
   order: {
     type: Number,
-    default: 0,
+    default: 1,
+    min: [1, 'Order must be at least 1'],
   },
   isActive: {
     type: Boolean,
@@ -44,9 +45,8 @@ const categorySchema = new mongoose.Schema({
   timestamps: true,
 });
 
-categorySchema.index({ slug: 1 }, { unique: true });
-categorySchema.index({ parent: 1 });
-categorySchema.index({ isActive: 1, order: 1 });
+categorySchema.index({ parent: 1, order: 1, name: 1, _id: 1 });
+categorySchema.index({ isActive: 1, order: 1, name: 1, _id: 1 });
 
 categorySchema.pre('save', function (next) {
   if (this.isModified('name') || !this.slug) {

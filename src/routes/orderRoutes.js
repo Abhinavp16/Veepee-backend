@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const orderController = require('../controllers/orderController');
-const { protect } = require('../middlewares/auth');
+const { protect, authorize } = require('../middlewares/auth');
 const validate = require('../middlewares/validate');
 const { orderValidation } = require('../validations');
 
 router.use(protect);
+router.use(authorize('buyer', 'wholesaler', 'admin'));
 
 router.get('/', orderController.getMyOrders);
 router.post('/preview-coupon', validate(orderValidation.previewCoupon), orderController.previewCouponForCart);

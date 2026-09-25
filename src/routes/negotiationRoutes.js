@@ -6,6 +6,7 @@ const validate = require('../middlewares/validate');
 const { negotiationValidation } = require('../validations');
 
 router.use(protect);
+router.use(authorize('buyer', 'wholesaler', 'admin'));
 
 router.get('/', negotiationController.getMyNegotiations);
 router.post('/', validate(negotiationValidation.create), negotiationController.createNegotiation);

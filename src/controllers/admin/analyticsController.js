@@ -168,18 +168,29 @@ exports.getProductAnalytics = async (req, res, next) => {
 
 exports.getSalesAnalytics = async (req, res, next) => {
   try {
-    const { period = '30d', groupBy = 'day' } = req.query;
+    const { period = 'all', groupBy = 'month' } = req.query;
 
     const daysMap = { '7d': 7, '30d': 30, '90d': 90, '1y': 365 };
-    const days = daysMap[period] || 30;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    const days = daysMap[period];
+    const startDate = days ? new Date() : null;
+    if (startDate) startDate.setDate(startDate.getDate() - days);
+
+    const salesStatuses = [
+      ORDER_STATUS.PAYMENT_VERIFIED,
+      ORDER_STATUS.PROCESSING,
+      ORDER_STATUS.SHIPPED,
+      ORDER_STATUS.DELIVERED,
+    ];
+    const salesMatch = {
+      status: { $in: salesStatuses },
+      ...(startDate ? { createdAt: { $gte: startDate } } : {}),
+    };
 
     const dateFormat = groupBy === 'month' ? '%Y-%m' : groupBy === 'week' ? '%Y-W%V' : '%Y-%m-%d';
 
     const [summary, timeline, byCategory] = await Promise.all([
       Order.aggregate([
-        { $match: { createdAt: { $gte: startDate }, status: { $ne: ORDER_STATUS.CANCELLED } } },
+        { $match: salesMatch },
         {
           $group: {
             _id: null,
@@ -190,7 +201,7 @@ exports.getSalesAnalytics = async (req, res, next) => {
         },
       ]),
       Order.aggregate([
-        { $match: { createdAt: { $gte: startDate }, status: { $ne: ORDER_STATUS.CANCELLED } } },
+        { $match: salesMatch },
         {
           $group: {
             _id: { $dateToString: { format: dateFormat, date: '$createdAt' } },
@@ -202,7 +213,7 @@ exports.getSalesAnalytics = async (req, res, next) => {
         { $project: { date: '$_id', orders: 1, revenue: 1, _id: 0 } },
       ]),
       Order.aggregate([
-        { $match: { createdAt: { $gte: startDate }, status: { $ne: ORDER_STATUS.CANCELLED } } },
+        { $match: salesMatch },
         { $unwind: '$items' },
         {
           $lookup: {
@@ -226,7 +237,7 @@ exports.getSalesAnalytics = async (req, res, next) => {
     ]);
 
     const orderTypeCounts = await Order.aggregate([
-      { $match: { createdAt: { $gte: startDate }, status: { $ne: ORDER_STATUS.CANCELLED } } },
+      { $match: salesMatch },
       { $group: { _id: '$orderType', count: { $sum: 1 } } },
     ]);
 

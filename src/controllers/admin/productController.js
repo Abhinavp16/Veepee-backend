@@ -129,7 +129,7 @@ exports.getProducts = async (req, res, next) => {
   try {
     const { status, category, categoryId, companyId, includeDescendants, search, sort } = req.query;
     // Category-scoped Price Management lists are always paged at exactly 20 items.
-    const { page, limit, skip } = paginate(req.query.page, categoryId ? 20 : req.query.limit, categoryId ? 20 : 50);
+    const { page, limit, skip } = paginate(req.query.page, categoryId ? 20 : req.query.limit, categoryId ? 20 : 100);
 
     const query = {};
     if (status) query.status = status;

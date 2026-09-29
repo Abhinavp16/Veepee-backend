@@ -8,7 +8,7 @@ const seedOrders = async () => {
     try {
         await mongoose.connect(process.env.MONGODB_URI);
 
-        const admin = await User.findOne({ email: 'admin@agrimart.com' });
+        const admin = await User.findOne({ email: 'admin@veepeeimpex.com' });
 
         // Create dummy customer
         let customer = await User.findOne({ email: 'customer@test.com' });

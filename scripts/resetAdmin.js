@@ -7,12 +7,12 @@ const resetAdmin = async () => {
         await mongoose.connect(process.env.MONGODB_URI);
         console.log('Connected to MongoDB');
 
-        const adminEmail = 'admin@agrimart.com';
+        const adminEmail = 'admin@veepeeimpex.com';
         await User.deleteOne({ email: adminEmail });
         console.log('Deleted existing admin user');
 
         const adminUser = await User.create({
-            name: 'AgriMart Admin',
+            name: 'VeepeeImpex Admin',
             email: adminEmail,
             phone: '9999999999',
             passwordHash: 'admin123',

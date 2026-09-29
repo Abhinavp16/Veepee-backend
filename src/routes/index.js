@@ -188,7 +188,7 @@ const getFirebaseHealth = () => {
 router.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'AgriMart API v1',
+    message: 'VeepeeImpex API v1',
     version: '1.0.0',
     endpoints: {
       auth: '/api/v1/auth',

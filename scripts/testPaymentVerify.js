@@ -10,7 +10,7 @@ async function testPaymentVerify() {
         // 1. Login
         console.log('Logging in...');
         const loginRes = await axios.post('http://localhost:5000/api/v1/auth/login', {
-            email: 'admin@agrimart.com',
+            email: 'admin@veepeeimpex.com',
             password: 'admin123'
         });
         const token = loginRes.data.data.accessToken;

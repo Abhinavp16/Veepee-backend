@@ -8,7 +8,7 @@ const settingsSchema = new mongoose.Schema({
 
   businessName: {
     type: String,
-    default: 'AgriMart',
+    default: 'VeepeeImpex',
   },
   businessPhone: String,
   businessEmail: String,
@@ -109,8 +109,8 @@ settingsSchema.statics.getSettings = async function () {
   if (!settings) {
     settings = await this.create({
       _id: 'app_settings',
-      upiId: process.env.DEFAULT_UPI_ID || 'agrimart@ybl',
-      upiDisplayName: process.env.DEFAULT_UPI_NAME || 'AgriMart Payments',
+      upiId: process.env.DEFAULT_UPI_ID || 'veepeeimpex@ybl',
+      upiDisplayName: process.env.DEFAULT_UPI_NAME || 'VeepeeImpex Payments',
     });
   }
   

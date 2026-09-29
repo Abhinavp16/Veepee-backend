@@ -2,9 +2,9 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 
-const ADMIN_EMAIL = 'admin@agrimart.com';
+const ADMIN_EMAIL = 'admin@veepeeimpex.com';
 const ADMIN_PASSWORD = 'Admin@123';
-const ADMIN_NAME = 'AgriMart Admin';
+const ADMIN_NAME = 'VeepeeImpex Admin';
 const ADMIN_PHONE = '+919999999999';
 
 const seedAdmin = async () => {

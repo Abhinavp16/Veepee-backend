@@ -114,7 +114,7 @@ if (process.env.NODE_ENV === 'development') {
 app.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
-    message: 'AgriMart API is running',
+    message: 'VeepeeImpex API is running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV
   });
@@ -124,7 +124,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.status(200).json({
     success: true,
-    message: 'AgriMart API is running',
+    message: 'VeepeeImpex API is running',
     docs: '/api/v1',
     health: '/health',
     apiHealth: '/api/v1/health',

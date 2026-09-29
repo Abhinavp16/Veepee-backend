@@ -7,7 +7,7 @@ const seedTestUser = async () => {
         await mongoose.connect(process.env.MONGODB_URI);
         console.log('Connected to MongoDB');
 
-        const testEmail = 'test@agrimart.com';
+        const testEmail = 'test@veepeeimpex.com';
         const existingUser = await User.findOne({ email: testEmail });
 
         if (existingUser) {

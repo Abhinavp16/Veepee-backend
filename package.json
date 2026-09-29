@@ -1,7 +1,7 @@
 {
   "name": "agri-mart-backend",
   "version": "1.0.0",
-  "description": "AgriMart - Agricultural Machinery E-Commerce API",
+  "description": "VeepeeImpex - Agricultural Machinery E-Commerce API",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

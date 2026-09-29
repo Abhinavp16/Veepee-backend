@@ -1,4 +1,9 @@
 const Joi = require('joi');
+const { validateIndianPhoneJoi } = require('../utils/phoneValidator');
+
+const indianPhone = Joi.string()
+  .custom(validateIndianPhoneJoi)
+  .messages({ 'any.invalid': 'Please provide a valid Indian mobile number' });
 
 const objectId = Joi.string().pattern(/^[0-9a-fA-F]{24}$/);
 const categoryIds = Joi.alternatives().try(
@@ -18,7 +23,7 @@ const authValidation = {
     name: Joi.string().required().max(100),
     email: Joi.string().email().required(),
     password: Joi.string().min(8).required(),
-    phone: Joi.string().required(),
+    phone: indianPhone.required(),
     role: Joi.string().valid('buyer').default('buyer'),
     marketingConsent: Joi.boolean().default(false),
   }),
@@ -27,7 +32,7 @@ const authValidation = {
     name: Joi.string().required().max(100),
     email: Joi.string().email().required(),
     password: Joi.string().min(8).required(),
-    phone: Joi.string().required(),
+    phone: indianPhone.required(),
     businessName: Joi.string().required().max(200),
     gstNumber: Joi.string().allow('', null),
     marketingConsent: Joi.boolean().default(false),
@@ -46,29 +51,29 @@ const authValidation = {
 
   registerPhone: Joi.object({
     name: Joi.string().required().max(100),
-    phone: Joi.string().required().min(10).max(15),
+    phone: indianPhone.required(),
     password: Joi.string().min(6).required(),
   }),
 
   registerPhoneWholesaler: Joi.object({
     name: Joi.string().required().max(100),
-    phone: Joi.string().required().min(10).max(15),
+    phone: indianPhone.required(),
     password: Joi.string().min(6).required(),
     businessName: Joi.string().allow('', null).max(200),
   }),
 
   googleAuth: Joi.object({
     idToken: Joi.string().required(),
-    phone: Joi.string().required(),
+    phone: indianPhone.required(),
     marketingConsent: Joi.boolean().default(false),
   }),
 
   sendOtp: Joi.object({
-    phone: Joi.string().required(),
+    phone: indianPhone.required(),
   }),
 
   verifyPhone: Joi.object({
-    phone: Joi.string().required(),
+    phone: indianPhone.required(),
     otp: Joi.string().length(6).required(),
   }),
 

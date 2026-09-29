@@ -164,12 +164,12 @@ exports.getProductBySlug = async (req, res, next) => {
     let product = await Product.findOne({
       slug: param,
       status: PRODUCT_STATUS.ACTIVE,
-    }).populate(productCategoryPopulate).lean();
+    }).populate(productCategoryPopulate).populate('company', 'name').lean();
 
     // If opened from cart/order history, ID may point to a non-active product.
     // Allow ID lookup regardless of status so users can still view item details.
     if (!product && param.match(/^[0-9a-fA-F]{24}$/)) {
-      product = await Product.findById(param).populate(productCategoryPopulate).lean();
+      product = await Product.findById(param).populate(productCategoryPopulate).populate('company', 'name').lean();
     }
 
     if (!product) {
@@ -220,6 +220,9 @@ exports.getProductBySlug = async (req, res, next) => {
     const responseData = {
       ...product,
       id: product._id,
+      // Keep `company` as a plain id (unchanged contract) and expose the brand name separately.
+      company: product.company?._id || null,
+      brand: product.brand || product.company?.name || '',
       ...categoryResponse(product),
       ...pricing,
       labels: resolvedLabels,

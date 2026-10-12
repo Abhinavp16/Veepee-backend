@@ -6,6 +6,10 @@ const connectDB = require('../config/database');
 const { getDatabaseHealth } = require('../config/database');
 const { PRODUCT_STATUS } = require('../utils/constants');
 const cronAuth = require('../middlewares/cronAuth');
+const { publicFormLimiter } = require('../middlewares/rateLimits');
+const validate = require('../middlewares/validate');
+const { authValidation } = require('../validations');
+const accountDeletionController = require('../controllers/accountDeletionController');
 
 const authRoutes = require('./authRoutes');
 const productRoutes = require('./productRoutes');
@@ -397,6 +401,9 @@ router.get('/offers', async (req, res, next) => {
     next(error);
   }
 });
+
+// Public account-deletion request form (website). Replies identically whether or not an account matches.
+router.post('/account-deletion-request', publicFormLimiter, validate(authValidation.publicAccountDeletionRequest), accountDeletionController.requestDeletionFromWebsite);
 
 // Scheduled job: apply scheduled price changes that have come due (Vercel Cron).
 router.get('/internal/cron/price-changes', cronAuth, async (req, res, next) => {

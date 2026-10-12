@@ -81,6 +81,14 @@ const authValidation = {
     refreshToken: Joi.string().required(),
   }),
 
+  requestAccountDeletion: Joi.object({}),
+
+  // Lenient phone rule: older accounts were never format-checked.
+  publicAccountDeletionRequest: Joi.object({
+    name: Joi.string().trim().max(100).required(),
+    phone: Joi.string().trim().min(10).max(15).required(),
+  }),
+
   updateProfile: Joi.object({
     name: Joi.string().max(100),
     avatar: Joi.string().uri().allow('', null),
@@ -302,6 +310,18 @@ const adminValidation = {
       otherwise: Joi.forbidden(),
     }),
   }).or('retailPrice', 'wholesalePrice', 'mrp'),
+
+  updateAccountDeletionRequest: Joi.object({
+    status: Joi.string().valid('in_review', 'rejected').required(),
+    identityVerified: Joi.boolean().default(false),
+    staffNote: Joi.string().trim().max(1000).allow('', null),
+  }),
+
+  completeAccountDeletionRequest: Joi.object({
+    staffNote: Joi.string().trim().max(1000).allow('', null),
+    // Website requests: the admin confirms they verified the account holder.
+    identityVerified: Joi.boolean().default(false),
+  }),
 
   createStaff: Joi.object({
     name: Joi.string().trim().max(100).required(),

@@ -16,6 +16,7 @@ const adminCustomerController = require('../controllers/admin/customerController
 const adminOfferController = require('../controllers/admin/offerController');
 const adminAffiliateController = require('../controllers/admin/affiliateCodeController');
 const adminReviewController = require('../controllers/admin/reviewController');
+const adminAccountDeletionController = require('../controllers/admin/accountDeletionController');
 const staffController = require('../controllers/admin/staffController');
 const { adminValidation } = require('../validations');
 
@@ -120,6 +121,11 @@ router.get('/affiliate-commissions', administrator, adminAffiliateController.get
 
 router.get('/reviews', administrator, adminReviewController.getAllReviews);
 router.post('/reviews', administrator, adminReviewController.createReview);
+
+// Account deletion requests (administrators only)
+router.get('/account-deletion-requests', administrator, adminAccountDeletionController.getRequests);
+router.put('/account-deletion-requests/:id', administrator, validate(adminValidation.updateAccountDeletionRequest), adminAccountDeletionController.updateRequestStatus);
+router.post('/account-deletion-requests/:id/complete', administrator, validate(adminValidation.completeAccountDeletionRequest), adminAccountDeletionController.completeRequest);
 router.get('/reviews/:id', administrator, adminReviewController.getReview);
 router.put('/reviews/:id', administrator, adminReviewController.updateReview);
 router.delete('/reviews/:id', administrator, adminReviewController.deleteReview);

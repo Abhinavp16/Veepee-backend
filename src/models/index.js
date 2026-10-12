@@ -18,6 +18,7 @@ const Review = require('./Review');
 const WebsiteSettings = require('./WebsiteSettings');
 const Category = require('./Category');
 const PriceChangeAudit = require('./PriceChangeAudit');
+const AccountDeletionRequest = require('./AccountDeletionRequest');
 
 module.exports = {
   User,
@@ -40,4 +41,5 @@ module.exports = {
   WebsiteSettings,
   Category,
   PriceChangeAudit,
+  AccountDeletionRequest,
 };

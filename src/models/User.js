@@ -92,6 +92,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  // Set when the account is closed through the deletion workflow.
+  deletedAt: {
+    type: Date,
+    default: null,
+  },
 }, {
   timestamps: true,
 });

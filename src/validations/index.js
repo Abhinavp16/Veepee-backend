@@ -294,13 +294,14 @@ const adminValidation = {
   priceChange: Joi.object({
     retailPrice: Joi.number().min(0),
     wholesalePrice: Joi.number().min(0),
+    mrp: Joi.number().min(0),
     priceChangeMode: Joi.string().valid('immediate', 'schedule_24h', 'schedule_48h', 'custom').required(),
     effectiveAt: Joi.when('priceChangeMode', {
       is: 'custom',
       then: Joi.string().isoDate().required(),
       otherwise: Joi.forbidden(),
     }),
-  }).or('retailPrice', 'wholesalePrice'),
+  }).or('retailPrice', 'wholesalePrice', 'mrp'),
 
   createStaff: Joi.object({
     name: Joi.string().trim().max(100).required(),

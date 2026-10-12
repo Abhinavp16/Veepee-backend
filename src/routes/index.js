@@ -5,6 +5,7 @@ const { getFirebaseApp, getMessaging, getStorage } = require('../config/firebase
 const connectDB = require('../config/database');
 const { getDatabaseHealth } = require('../config/database');
 const { PRODUCT_STATUS } = require('../utils/constants');
+const cronAuth = require('../middlewares/cronAuth');
 
 const authRoutes = require('./authRoutes');
 const productRoutes = require('./productRoutes');
@@ -392,6 +393,17 @@ router.get('/offers', async (req, res, next) => {
 
     const offers = await Offer.find(query).sort({ createdAt: -1 }).lean();
     res.json({ success: true, data: offers });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Scheduled job: apply scheduled price changes that have come due (Vercel Cron).
+router.get('/internal/cron/price-changes', cronAuth, async (req, res, next) => {
+  try {
+    const { processDuePriceChanges } = require('../services/priceLifecycleService');
+    const result = await processDuePriceChanges();
+    res.json({ success: true, data: result });
   } catch (error) {
     next(error);
   }

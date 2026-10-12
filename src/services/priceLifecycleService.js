@@ -4,7 +4,7 @@ const { Product, PriceChangeAudit } = require('../models');
 const notificationService = require('./notificationService');
 const { BadRequestError, ConflictError, NotFoundError } = require('../utils/errors');
 const { BUSINESS_TIMEZONE } = require('../config/businessTimezone');
-const PRICE_FIELDS = ['retailPrice', 'wholesalePrice'];
+const PRICE_FIELDS = ['retailPrice', 'wholesalePrice', 'mrp'];
 const HOUR_MS = 60 * 60 * 1000;
 
 function hasOwn(value, key) {
@@ -22,9 +22,18 @@ function submittedPrices(prices) {
     result[field] = value;
   }
   if (Object.keys(result).length === 0) {
-    throw new BadRequestError('Provide retailPrice or wholesalePrice', 'PRICE_REQUIRED');
+    throw new BadRequestError('Provide retailPrice, wholesalePrice or mrp', 'PRICE_REQUIRED');
   }
   return result;
+}
+
+// Only enforced when an MRP is part of the request, so legacy retail-only changes keep working.
+function assertMrpNotBelowRetail(product, prices) {
+  if (!hasOwn(prices, 'mrp')) return;
+  const retail = hasOwn(prices, 'retailPrice') ? prices.retailPrice : Number(product.retailPrice);
+  if (Number.isFinite(retail) && prices.mrp < retail) {
+    throw new BadRequestError('MRP cannot be lower than the retail price', 'MRP_BELOW_RETAIL');
+  }
 }
 
 function assertSubmittedPricesChange(product, prices) {
@@ -92,6 +101,7 @@ function requestFingerprint(prices, priceChangeMode, effectiveAt) {
   return crypto.createHash('sha256').update(JSON.stringify({
     retailPrice: hasOwn(prices, 'retailPrice') ? Number(prices.retailPrice) : null,
     wholesalePrice: hasOwn(prices, 'wholesalePrice') ? Number(prices.wholesalePrice) : null,
+    mrp: hasOwn(prices, 'mrp') ? Number(prices.mrp) : null,
     priceChangeMode,
     effectiveAt: effectiveAt || null,
   })).digest('hex');
@@ -101,6 +111,7 @@ function clearPendingPriceChange() {
   return {
     pendingRetailPrice: null,
     pendingWholesalePrice: null,
+    pendingMrp: null,
     priceChangeScheduledAt: null,
     priceChangeEffectiveAt: null,
     activePendingPriceChangeAudit: null,
@@ -117,6 +128,7 @@ function productSnapshot(product) {
     productPrimaryCategoryId: product.primaryCategoryId || null,
     previousRetailPrice: Number(product.retailPrice),
     previousWholesalePrice: Number(product.wholesalePrice),
+    previousMrp: Number.isFinite(Number(product.mrp)) ? Number(product.mrp) : null,
   };
 }
 
@@ -128,10 +140,13 @@ function priceChangeEvent(product, audit) {
     retailPrice: Number(product.retailPrice),
     previousWholesalePrice: Number(audit.previousWholesalePrice),
     wholesalePrice: Number(product.wholesalePrice),
+    // An MRP-only change doesn't alter what customers pay, so it shouldn't trigger a push.
+    priceTiersChanged: audit.newRetailPrice != null || audit.newWholesalePrice != null,
   };
 }
 
 async function notifyCartOwnersOfPriceChange(event) {
+  if (event.priceTiersChanged === false) return;
   try {
     await notificationService.notifyCartOwnersOfPriceChange(event);
   } catch (error) {
@@ -183,6 +198,7 @@ async function requestPriceChange({ productId, prices, priceChangeMode, effectiv
       const product = await Product.findById(productId).session(session);
       if (!product) throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       assertSubmittedPricesChange(product, suppliedPrices);
+      assertMrpNotBelowRetail(product, suppliedPrices);
 
       const status = priceChangeMode === 'immediate' ? 'applied' : 'scheduled';
       const [audit] = await PriceChangeAudit.create([{
@@ -191,6 +207,7 @@ async function requestPriceChange({ productId, prices, priceChangeMode, effectiv
         adminName: adminName || 'Admin',
         newRetailPrice: hasOwn(suppliedPrices, 'retailPrice') ? suppliedPrices.retailPrice : null,
         newWholesalePrice: hasOwn(suppliedPrices, 'wholesalePrice') ? suppliedPrices.wholesalePrice : null,
+        newMrp: hasOwn(suppliedPrices, 'mrp') ? suppliedPrices.mrp : null,
         scheduleType: priceChangeMode,
         scheduledAt,
         effectiveAt: normalizedEffectiveAt,
@@ -214,6 +231,7 @@ async function requestPriceChange({ productId, prices, priceChangeMode, effectiv
       } else {
         if (hasOwn(suppliedPrices, 'retailPrice')) nextProductValues.pendingRetailPrice = suppliedPrices.retailPrice;
         if (hasOwn(suppliedPrices, 'wholesalePrice')) nextProductValues.pendingWholesalePrice = suppliedPrices.wholesalePrice;
+        if (hasOwn(suppliedPrices, 'mrp')) nextProductValues.pendingMrp = suppliedPrices.mrp;
         nextProductValues.priceChangeScheduledAt = scheduledAt;
         nextProductValues.priceChangeEffectiveAt = normalizedEffectiveAt;
         nextProductValues.activePendingPriceChangeAudit = audit._id;
@@ -256,6 +274,7 @@ async function applyDuePriceChange(productId, auditId, now = new Date()) {
       const updates = clearPendingPriceChange();
       if (product.pendingRetailPrice !== null && product.pendingRetailPrice !== undefined) updates.retailPrice = product.pendingRetailPrice;
       if (product.pendingWholesalePrice !== null && product.pendingWholesalePrice !== undefined) updates.wholesalePrice = product.pendingWholesalePrice;
+      if (product.pendingMrp !== null && product.pendingMrp !== undefined) updates.mrp = product.pendingMrp;
 
       const updatedProduct = await Product.findByIdAndUpdate(
         productId,
@@ -298,6 +317,8 @@ async function processDuePriceChanges() {
 }
 
 module.exports = {
+  // Pure helpers exposed for unit tests only.
+  __test: { submittedPrices, assertSubmittedPricesChange, assertMrpNotBelowRetail, requestFingerprint, clearPendingPriceChange },
   TIME_ZONE: BUSINESS_TIMEZONE,
   calculateEffectiveAt,
   requestPriceChange,

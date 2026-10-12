@@ -35,6 +35,7 @@ exports.createPriceChange = async (req, res, next) => {
       prices: {
         ...(req.body.retailPrice !== undefined ? { retailPrice: req.body.retailPrice } : {}),
         ...(req.body.wholesalePrice !== undefined ? { wholesalePrice: req.body.wholesalePrice } : {}),
+        ...(req.body.mrp !== undefined ? { mrp: req.body.mrp } : {}),
       },
       priceChangeMode: req.body.priceChangeMode,
       effectiveAt: req.body.effectiveAt,
@@ -72,7 +73,7 @@ exports.getPriceChangeHistory = async (req, res, next) => {
 exports.exportPriceSnapshot = async (req, res, next) => {
   try {
     const products = await Product.find({ status: { $ne: 'archived' } })
-      .select('name sku category categoryIds primaryCategoryId status mrp retailPrice wholesalePrice stock pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt')
+      .select('name sku category categoryIds primaryCategoryId status mrp retailPrice wholesalePrice stock pendingRetailPrice pendingWholesalePrice pendingMrp priceChangeScheduledAt priceChangeEffectiveAt')
       .populate(productCategoryPopulate)
       .sort({ category: 1, name: 1, _id: 1 })
       .lean();

@@ -77,6 +77,7 @@ const productSchema = new mongoose.Schema({
   // worker updates cannot accidentally merge a replacement request.
   pendingRetailPrice: { type: Number, min: [0, 'Pending retail price cannot be negative'], default: null },
   pendingWholesalePrice: { type: Number, min: [0, 'Pending wholesale price cannot be negative'], default: null },
+  pendingMrp: { type: Number, min: [0, 'Pending MRP cannot be negative'], default: null },
   priceChangeScheduledAt: { type: Date, default: null },
   priceChangeEffectiveAt: { type: Date, default: null },
   activePendingPriceChangeAudit: {

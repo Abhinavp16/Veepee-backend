@@ -22,8 +22,10 @@ const priceChangeAuditSchema = new mongoose.Schema({
   adminName: { type: String, required: true, trim: true },
   previousRetailPrice: { type: Number, required: true, min: 0 },
   previousWholesalePrice: { type: Number, required: true, min: 0 },
+  previousMrp: nullablePrice,
   newRetailPrice: nullablePrice,
   newWholesalePrice: nullablePrice,
+  newMrp: nullablePrice,
   scheduleType: {
     type: String,
     enum: ['immediate', 'schedule_24h', 'schedule_48h', 'custom'],

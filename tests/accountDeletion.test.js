@@ -5,7 +5,7 @@ const assert = require('assert');
 // writes test data, so it only runs against a database on this machine
 // (never the live database):
 //
-//   ACCOUNT_DELETION_TEST_MONGODB_URI=mongodb://127.0.0.1:27199/deletion_test node tests/accountDeletion.test.js
+//   ACCOUNT_DELETION_TEST_MONGODB_URI=mongodb://127.0.0.1:27231/oxon_deletion_test node tests/accountDeletion.test.js
 
 process.env.JWT_SECRET = 'test-access-secret-0123456789-abcdefghij';
 process.env.RATE_LIMIT_MAX_REQUESTS = '10000';

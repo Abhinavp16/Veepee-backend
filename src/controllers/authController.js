@@ -7,6 +7,7 @@ const { UnauthorizedError, ConflictError, BadRequestError, ForbiddenError } = re
 const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 const { sanitizeUser } = require('../utils/helpers');
 const { requireAcceptance, buildAcceptanceFields } = require('../config/legalAcceptance');
+const { notifyTeam } = require('../services/adminNotificationService');
 
 const { ACCESS_SECONDS, REFRESH_SECONDS, STAFF_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
 
@@ -705,6 +706,15 @@ exports.convertToWholesaler = async (req, res, next) => {
     user.phone = phone || user.phone;
 
     await user.save();
+
+    notifyTeam({
+      type: 'upgrade_request',
+      audience: 'admin',
+      title: 'Wholesaler upgrade request',
+      body: `${user.name} applied for a wholesaler account (${businessName || 'no business name'}).`,
+      link: '/account-upgrades',
+      data: { userId: user._id },
+    });
 
     res.json({
       success: true,

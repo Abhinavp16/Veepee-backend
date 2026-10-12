@@ -6,6 +6,7 @@ const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('.
 const { loadDiscountContext, priceFor } = require('../services/productPricingService');
 const { assertPurchasable } = require('../utils/productAvailability');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
+const { notifyTeam } = require('../services/adminNotificationService');
 
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
@@ -513,6 +514,14 @@ exports.createOrderFromCart = async (req, res, next) => {
       upiId: settings.upiId,
     });
 
+    notifyTeam({
+      type: 'new_order',
+      title: 'New order',
+      body: `${order.customerSnapshot?.name || 'A customer'} placed order ${order.orderNumber} (₹${order.total}).`,
+      link: '/orders',
+      data: { orderId: order._id, orderNumber: order.orderNumber },
+    });
+
     res.status(201).json({
       success: true,
       message: 'Order created. Please complete payment.',
@@ -643,6 +652,14 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       userId: req.user._id,
       amount: order.total,
       upiId: settings.upiId,
+    });
+
+    notifyTeam({
+      type: 'new_order',
+      title: 'New order',
+      body: `${order.customerSnapshot?.name || 'A customer'} placed order ${order.orderNumber} (₹${order.total}).`,
+      link: '/orders',
+      data: { orderId: order._id, orderNumber: order.orderNumber },
     });
 
     res.status(201).json({

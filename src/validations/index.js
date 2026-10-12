@@ -429,6 +429,14 @@ const adminValidation = {
     reason: Joi.string().required().max(500),
   }),
 
+  markNotificationsRead: Joi.object({
+    ids: Joi.array().items(objectId).max(200),
+  }),
+
+  webPushToken: Joi.object({
+    fcmToken: Joi.string().max(4096).required(),
+  }),
+
   setDiscount: Joi.object({
     customerDiscountPercent: Joi.number().min(0).max(99),
     wholesalerDiscountPercent: Joi.number().min(0).max(99),

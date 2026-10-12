@@ -11,6 +11,7 @@ const Company = require('./Company');
 const StockLog = require('./StockLog');
 const DeviceToken = require('./DeviceToken');
 const ProductAlert = require('./ProductAlert');
+const AdminNotification = require('./AdminNotification');
 const Notification = require('./Notification');
 const Offer = require('./Offer');
 const AffiliateCode = require('./AffiliateCode');
@@ -35,6 +36,7 @@ module.exports = {
   StockLog,
   DeviceToken,
   ProductAlert,
+  AdminNotification,
   Notification,
   Offer,
   AffiliateCode,

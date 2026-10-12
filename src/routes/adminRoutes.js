@@ -12,6 +12,7 @@ const adminPaymentController = require('../controllers/admin/paymentController')
 const adminAnalyticsController = require('../controllers/admin/analyticsController');
 const adminSettingsController = require('../controllers/admin/settingsController');
 const adminDiscountController = require('../controllers/admin/discountController');
+const adminNotificationController = require('../controllers/admin/notificationController');
 const websiteSettingsController = require('../controllers/admin/websiteSettingsController');
 const adminCustomerController = require('../controllers/admin/customerController');
 const adminOfferController = require('../controllers/admin/offerController');
@@ -98,6 +99,11 @@ router.get('/analytics/products', administrator, adminAnalyticsController.getPro
 router.get('/analytics/sales', administrator, adminAnalyticsController.getSalesAnalytics);
 router.get('/analytics/demand', administrator, adminAnalyticsController.getDemandInsights);
 router.get('/analytics/potential-customers', administrator, adminAnalyticsController.getPotentialCustomers);
+
+router.get('/notifications', operationsStaff, adminNotificationController.listNotifications);
+router.post('/notifications/mark-read', operationsStaff, validate(adminValidation.markNotificationsRead), adminNotificationController.markRead);
+router.post('/notifications/register-token', operationsStaff, validate(adminValidation.webPushToken), adminNotificationController.registerWebToken);
+router.post('/notifications/unregister-token', operationsStaff, validate(adminValidation.webPushToken), adminNotificationController.unregisterWebToken);
 
 router.get('/discounts', administrator, adminDiscountController.listDiscounts);
 router.put('/discounts/:kind/:id', administrator, validate(adminValidation.setDiscount), adminDiscountController.setDiscount);

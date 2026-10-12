@@ -11,6 +11,7 @@ const {
   User,
 } = require('../models');
 const storageCleanup = require('../utils/storageCleanup');
+const { notifyTeam } = require('./adminNotificationService');
 const { ORDER_STATUS } = require('../utils/constants');
 const { BadRequestError, ConflictError, NotFoundError } = require('../utils/errors');
 
@@ -73,6 +74,15 @@ async function createRequestForUser({ user, source }) {
         ? 'Submitted by the authenticated account holder.'
         : 'Submitted through the public deletion page; identity verification is required.',
     }],
+  });
+
+  notifyTeam({
+    type: 'deletion_request',
+    audience: 'admin',
+    title: 'Account deletion request',
+    body: `${user.name || 'A customer'} asked to delete their account.`,
+    link: '/account-deletion-requests',
+    data: { requestId: request._id },
   });
 
   return { request, alreadyPending: false };

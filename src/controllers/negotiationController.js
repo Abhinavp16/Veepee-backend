@@ -5,6 +5,7 @@ const { NEGOTIATION_STATUS, NEGOTIATION_ACTIONS, USER_ROLES } = require('../util
 const { loadDiscountContext, priceFor } = require('../services/productPricingService');
 const { assertPurchasable } = require('../utils/productAvailability');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
+const { notifyTeam } = require('../services/adminNotificationService');
 
 exports.getMyNegotiations = async (req, res, next) => {
   try {
@@ -103,7 +104,13 @@ exports.createNegotiation = async (req, res, next) => {
 
     await Product.findByIdAndUpdate(productId, { $inc: { negotiationCount: 1 } });
 
-    // TODO: Send notification to admin
+    notifyTeam({
+      type: 'new_negotiation',
+      title: 'New negotiation request',
+      body: `${req.user.name} asked for ${quantity} × ${product.name} at ₹${pricePerUnit} each.`,
+      link: '/negotiations',
+      data: { negotiationId: negotiation._id },
+    });
 
     res.status(201).json({
       success: true,

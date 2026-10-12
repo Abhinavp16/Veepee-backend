@@ -1,3 +1,4 @@
+const { notifyTeam } = require('../services/adminNotificationService');
 const { Payment, Order, Settings } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../utils/constants');
@@ -88,7 +89,13 @@ exports.uploadScreenshot = async (req, res, next) => {
     order.addStatusHistory(ORDER_STATUS.PAYMENT_UPLOADED, 'Payment screenshot uploaded');
     await order.save();
 
-    // TODO: Notify admin
+    notifyTeam({
+      type: 'payment_uploaded',
+      title: 'Payment to verify',
+      body: `${order.customerSnapshot?.name || 'A customer'} uploaded a payment screenshot for order ${order.orderNumber}.`,
+      link: '/orders',
+      data: { orderId: order._id, orderNumber: order.orderNumber },
+    });
 
     res.json({
       success: true,

@@ -75,6 +75,10 @@ router.post('/products/hindi-names/generate-missing', administrator, adminProduc
 
 // Staff may read and respond to negotiations, but has no access to pricing, payments, or marketing.
 router.get('/negotiations', operationsStaff, adminNegotiationController.getNegotiations);
+router.get('/negotiations/groups/:groupId', operationsStaff, adminNegotiationController.getRequirement);
+router.put('/negotiations/groups/:groupId/accept', operationsStaff, validate(adminValidation.respondRequirement), adminNegotiationController.respondToRequirement('accept'));
+router.put('/negotiations/groups/:groupId/counter', operationsStaff, validate(adminValidation.counterRequirement), adminNegotiationController.respondToRequirement('counter'));
+router.put('/negotiations/groups/:groupId/reject', operationsStaff, validate(adminValidation.respondRequirement), adminNegotiationController.respondToRequirement('reject'));
 router.get('/negotiations/:id', operationsStaff, adminNegotiationController.getNegotiationById);
 router.put('/negotiations/:id/accept', operationsStaff, adminNegotiationController.acceptNegotiation);
 router.put('/negotiations/:id/reject', operationsStaff, validate(adminValidation.rejectNegotiation), adminNegotiationController.rejectNegotiation);

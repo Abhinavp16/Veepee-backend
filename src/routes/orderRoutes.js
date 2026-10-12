@@ -11,6 +11,7 @@ router.use(authorize('buyer', 'wholesaler', 'admin'));
 router.get('/', orderController.getMyOrders);
 router.post('/preview-coupon', validate(orderValidation.previewCoupon), orderController.previewCouponForCart);
 router.post('/', validate(orderValidation.createFromCart), orderController.createOrderFromCart);
+router.post('/from-group', validate(orderValidation.createFromGroup), orderController.createOrderFromGroup);
 router.post('/from-negotiation', validate(orderValidation.createFromNegotiation), orderController.createOrderFromNegotiation);
 router.get('/:id', orderController.getOrderById);
 

@@ -203,6 +203,15 @@ const negotiationValidation = {
     pricePerUnit: Joi.number().min(0).required(),
     message: Joi.string().max(500).allow('', null),
   }),
+
+  fromCart: Joi.object({
+    message: Joi.string().max(500).allow('', null),
+    // Optional own prices; every other line is asked at its current wholesale price.
+    offers: Joi.array().items(Joi.object({
+      productId: objectId.required(),
+      pricePerUnit: Joi.number().greater(0).required(),
+    })).max(100),
+  }),
 };
 
 const orderValidation = {
@@ -240,6 +249,22 @@ const orderValidation = {
   previewCoupon: Joi.object({
     couponCode: Joi.string().trim().uppercase().required(),
     subtotal: Joi.number().min(0),
+  }),
+
+  createFromGroup: Joi.object({
+    groupId: Joi.string().guid().required(),
+    shippingAddress: Joi.object({
+      fullName: Joi.string().required().max(100),
+      phone: Joi.string().required(),
+      addressLine1: Joi.string().required().max(200),
+      addressLine2: Joi.string().allow('', null).max(200),
+      city: Joi.string().required().max(100),
+      state: Joi.string().required().max(100),
+      pincode: Joi.string().required().max(10),
+    }).required(),
+    customerNote: Joi.string().max(500).allow('', null),
+    couponCode: Joi.string().trim().uppercase().allow('', null),
+    affiliateCode: Joi.string().trim().uppercase().allow('', null),
   }),
 
   createFromNegotiation: Joi.object({
@@ -404,6 +429,18 @@ const adminValidation = {
 
   upgradeCustomer: Joi.object({
     action: Joi.string().valid('accept', 'reject').required(),
+  }),
+
+  counterRequirement: Joi.object({
+    counters: Joi.array().items(Joi.object({
+      negotiationId: objectId.required(),
+      pricePerUnit: Joi.number().greater(0).required(),
+    })).min(1).max(100).required(),
+    message: Joi.string().max(500).allow('', null),
+  }),
+
+  respondRequirement: Joi.object({
+    message: Joi.string().max(500).allow('', null),
   }),
 
   counterNegotiation: Joi.object({

@@ -65,6 +65,14 @@ const negotiationSchema = new mongoose.Schema({
     maxlength: [500, 'Message cannot exceed 500 characters'],
   },
 
+  // Set when several products were requested together (from the cart): every
+  // line shares the group, and the dealer answers and the wholesaler pays for
+  // the whole requirement at once.
+  requestGroup: {
+    id: { type: String, default: null },
+    number: { type: String, default: null },
+  },
+
   history: [historyEntrySchema],
 
   status: {
@@ -103,6 +111,7 @@ const negotiationSchema = new mongoose.Schema({
 });
 
 negotiationSchema.index({ negotiationNumber: 1 }, { unique: true });
+negotiationSchema.index({ 'requestGroup.id': 1 }, { sparse: true });
 negotiationSchema.index({ wholesalerId: 1, status: 1 });
 negotiationSchema.index({ productId: 1 });
 negotiationSchema.index({ status: 1, createdAt: -1 });

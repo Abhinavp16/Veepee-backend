@@ -14,6 +14,12 @@ const generateNegotiationNumber = () => {
   return `NGT-${year}-${timestamp}${random}`;
 };
 
+const generateRequirementNumber = () => {
+  const timestamp = Date.now().toString().slice(-5);
+  const random = crypto.randomInt(100, 999);
+  return `REQ-${timestamp}${random}`;
+};
+
 const generatePaymentNumber = () => {
   const year = new Date().getFullYear();
   const random = crypto.randomInt(1000, 9999);
@@ -74,6 +80,7 @@ const formatPrice = (price) => {
 module.exports = {
   generateOrderNumber,
   generateNegotiationNumber,
+  generateRequirementNumber,
   generatePaymentNumber,
   generateSKU,
   paginate,

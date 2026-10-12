@@ -3,6 +3,8 @@ const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { NEGOTIATION_STATUS, NEGOTIATION_ACTIONS } = require('../../utils/constants');
 const notificationService = require('../../services/notificationService');
+const requirementService = require('../../services/requirementGroupService');
+const { groupPayload } = require('../negotiationController');
 
 exports.getNegotiations = async (req, res, next) => {
   try {
@@ -37,6 +39,7 @@ exports.getNegotiations = async (req, res, next) => {
         price: n.productSnapshot.price,
         image: n.productSnapshot.image,
       },
+      requestGroup: n.requestGroup?.id ? { id: n.requestGroup.id, number: n.requestGroup.number } : null,
       requestedQuantity: n.requestedQuantity,
       requestedPricePerUnit: n.requestedPricePerUnit,
       requestedTotalPrice: n.requestedTotalPrice,
@@ -226,6 +229,35 @@ exports.counterNegotiation = async (req, res, next) => {
         currentPricePerUnit: negotiation.currentPricePerUnit,
         currentTotalPrice: negotiation.currentTotalPrice,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ---- Requirements ---------------------------------------------------------
+
+exports.getRequirement = async (req, res, next) => {
+  try {
+    const members = await requirementService.loadGroup(req.params.groupId);
+    res.json({ success: true, data: groupPayload(members, requirementService.summarizeGroup(members)) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.respondToRequirement = (action) => async (req, res, next) => {
+  try {
+    const { members, summary } = await requirementService.respondAsDealer({
+      groupId: req.params.groupId,
+      action,
+      counters: req.body.counters,
+      message: req.body.message,
+    });
+    res.json({
+      success: true,
+      message: { accept: 'Requirement accepted', counter: 'Counter offer sent', reject: 'Requirement declined' }[action],
+      data: groupPayload(members, summary),
     });
   } catch (error) {
     next(error);

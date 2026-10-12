@@ -71,6 +71,18 @@ const TEMPLATES = {
     en: { title: 'Now available!', body: '{productName} is now available on OXON.' },
     hi: { title: 'अब उपलब्ध!', body: '{productName} अब OXON पर उपलब्ध है।' },
   },
+  requirementCountered: {
+    en: { title: 'Counter offer on your requirement', body: 'The dealer sent new prices for {requirementNumber} ({count} products). Review and respond.' },
+    hi: { title: 'आपकी आवश्यकता पर नया प्रस्ताव', body: 'डीलर ने {requirementNumber} ({count} उत्पाद) के लिए नई कीमतें भेजी हैं। देखें और जवाब दें।' },
+  },
+  requirementAccepted: {
+    en: { title: 'Requirement accepted!', body: 'Your requirement {requirementNumber} was accepted. You can pay for all {count} products together now.' },
+    hi: { title: 'आवश्यकता स्वीकार हुई!', body: 'आपकी आवश्यकता {requirementNumber} स्वीकार हो गई है। अब सभी {count} उत्पादों का भुगतान एक साथ करें।' },
+  },
+  requirementDeclined: {
+    en: { title: 'Requirement declined', body: 'Your requirement {requirementNumber} was declined.' },
+    hi: { title: 'आवश्यकता अस्वीकृत', body: 'आपकी आवश्यकता {requirementNumber} अस्वीकार कर दी गई।' },
+  },
   negotiationUpdate: {
     en: { title: 'Negotiation Update', body: '{message}' },
     hi: { title: 'मोलभाव अपडेट', body: '{message}' },

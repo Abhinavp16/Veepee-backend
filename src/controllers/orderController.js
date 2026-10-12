@@ -7,6 +7,7 @@ const { loadDiscountContext, priceFor } = require('../services/productPricingSer
 const { assertPurchasable } = require('../utils/productAvailability');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
 const { notifyTeam } = require('../services/adminNotificationService');
+const { loadGroup, summarizeGroup } = require('../services/requirementGroupService');
 
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
@@ -547,6 +548,129 @@ exports.createOrderFromCart = async (req, res, next) => {
   }
 };
 
+// Places ONE order for one or more accepted negotiations (a single deal, or
+// every product of a requirement). Nothing is created unless every line is
+// still orderable.
+const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, customerNote, inputCode }) => {
+  const products = await Product.find({ _id: { $in: negotiations.map((n) => n.productId) } });
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+
+  const items = [];
+  for (const negotiation of negotiations) {
+    const product = productById.get(String(negotiation.productId));
+    if (!product) {
+      throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+    }
+    assertPurchasable(product);
+    if (product.stock < negotiation.requestedQuantity) {
+      const error = new BadRequestError(
+        negotiations.length > 1
+          ? `Only ${product.stock} of ${product.name} available`
+          : 'Insufficient stock',
+        'INSUFFICIENT_STOCK'
+      );
+      throw error;
+    }
+    items.push({
+      productId: product._id,
+      productSnapshot: { name: product.name, sku: product.sku, image: product.primaryImage },
+      quantity: negotiation.requestedQuantity,
+      pricePerUnit: negotiation.finalPricePerUnit,
+      totalPrice: negotiation.finalTotalPrice,
+    });
+  }
+
+  const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
+  const {
+    discountSource,
+    offerCode,
+    affiliateCode: resolvedAffiliateCode,
+    discount,
+  } = await resolveCouponDiscount({ couponCode: inputCode, subtotal, userRole: user.role });
+  const total = Math.max(subtotal - discount, 0);
+  const isGroup = negotiations.length > 1;
+
+  const order = await Order.create({
+    userId: user._id,
+    customerSnapshot: {
+      name: user.name,
+      email: user.email,
+      // Keep consistent fallback behavior with cart checkout.
+      phone: user.phone || shippingAddress?.phone,
+      businessName: user.businessInfo?.businessName,
+    },
+    orderType: ORDER_TYPES.WHOLESALE,
+    negotiationId: isGroup ? null : negotiations[0]._id,
+    negotiationIds: negotiations.map((n) => n._id),
+    items,
+    subtotal,
+    discount,
+    discountSource,
+    affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
+    total,
+    shippingAddress,
+    customerNote,
+    statusHistory: [{
+      status: ORDER_STATUS.PENDING_PAYMENT,
+      note: isGroup ? 'Order created from a requirement' : 'Order created from negotiation',
+    }],
+    affiliateCode: resolvedAffiliateCode,
+    offerCode,
+  });
+
+  if (discountSource === 'offer' && offerCode) {
+    await Offer.findOneAndUpdate({ code: offerCode }, { $inc: { usageCount: 1 } });
+  } else if (discountSource === 'affiliate' && resolvedAffiliateCode) {
+    await AffiliateCode.findOneAndUpdate({ code: resolvedAffiliateCode }, { $inc: { usageCount: 1 } });
+  }
+
+  for (const negotiation of negotiations) {
+    negotiation.status = NEGOTIATION_STATUS.CONVERTED;
+    negotiation.orderId = order._id;
+    await negotiation.save();
+  }
+
+  // Increment order count (stock deducted when admin confirms/processes)
+  await Product.updateMany({ _id: { $in: items.map((i) => i.productId) } }, { $inc: { orderCount: 1 } });
+
+  const settings = await Settings.getSettings();
+  await Payment.create({
+    orderId: order._id,
+    userId: user._id,
+    amount: order.total,
+    upiId: settings.upiId,
+  });
+
+  notifyTeam({
+    type: 'new_order',
+    title: 'New order',
+    body: `${order.customerSnapshot?.name || 'A customer'} placed order ${order.orderNumber} (₹${order.total}).`,
+    link: '/orders',
+    data: { orderId: order._id, orderNumber: order.orderNumber },
+  });
+
+  return { order, settings };
+};
+
+const negotiatedOrderResponse = ({ order, settings }) => ({
+  success: true,
+  message: 'Order created. Please complete payment.',
+  data: {
+    orderId: order._id,
+    orderNumber: order.orderNumber,
+    discount: order.discount,
+    total: order.total,
+    status: order.status,
+    offerCode: order.offerCode,
+    affiliateCode: order.affiliateCode,
+    discountSource: order.discountSource,
+    upiDetails: {
+      upiId: settings.upiId,
+      displayName: settings.upiDisplayName,
+    },
+  },
+});
+
 exports.createOrderFromNegotiation = async (req, res, next) => {
   try {
     const { negotiationId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
@@ -558,128 +682,35 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       status: NEGOTIATION_STATUS.ACCEPTED,
       orderId: null,
     });
-
     if (!negotiation) {
       throw new NotFoundError('Valid negotiation not found', 'NEGOTIATION_NOT_FOUND');
     }
-
-    const product = await Product.findById(negotiation.productId);
-    if (!product) {
-      throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+    if (negotiation.requestGroup?.id) {
+      throw new BadRequestError('This product is part of a requirement; pay for the whole requirement', 'PART_OF_REQUIREMENT');
     }
 
-    assertPurchasable(product);
-    if (product.stock < negotiation.requestedQuantity) {
-      throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
+    const placed = await placeNegotiatedOrder({ user: req.user, negotiations: [negotiation], shippingAddress, customerNote, inputCode });
+    res.status(201).json(negotiatedOrderResponse(placed));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// One order for a whole requirement, once every line has been answered.
+exports.createOrderFromGroup = async (req, res, next) => {
+  try {
+    const { groupId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
+    const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
+
+    const members = await loadGroup(groupId, { wholesalerId: req.user._id });
+    const summary = summarizeGroup(members);
+    if (!summary.canPay) {
+      throw new BadRequestError('Every product in this requirement must be answered before you can pay', 'REQUIREMENT_NOT_PAYABLE');
     }
+    const payable = members.filter((m) => m.status === NEGOTIATION_STATUS.ACCEPTED && !m.orderId);
 
-    const subtotal = negotiation.finalTotalPrice;
-    const {
-      discountSource,
-      offerCode,
-      affiliateCode: resolvedAffiliateCode,
-      discount,
-    } = await resolveCouponDiscount({
-      couponCode: inputCode,
-      subtotal,
-      userRole: req.user.role,
-    });
-    const total = Math.max(subtotal - discount, 0);
-
-    const order = await Order.create({
-      userId: req.user._id,
-      customerSnapshot: {
-        name: req.user.name,
-        email: req.user.email,
-        // Keep consistent fallback behavior with cart checkout.
-        phone: req.user.phone || shippingAddress?.phone,
-        businessName: req.user.businessInfo?.businessName,
-      },
-      orderType: ORDER_TYPES.WHOLESALE,
-      negotiationId: negotiation._id,
-      items: [{
-        productId: product._id,
-        productSnapshot: {
-          name: product.name,
-          sku: product.sku,
-          image: product.primaryImage,
-        },
-        quantity: negotiation.requestedQuantity,
-        pricePerUnit: negotiation.finalPricePerUnit,
-        totalPrice: negotiation.finalTotalPrice,
-      }],
-      subtotal,
-      discount,
-      discountSource,
-      affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
-      total,
-      shippingAddress,
-      customerNote,
-      statusHistory: [{
-        status: ORDER_STATUS.PENDING_PAYMENT,
-        note: 'Order created from negotiation',
-      }],
-      affiliateCode: resolvedAffiliateCode,
-      offerCode,
-    });
-
-    if (discountSource === 'offer' && offerCode) {
-      await Offer.findOneAndUpdate(
-        { code: offerCode },
-        { $inc: { usageCount: 1 } }
-      );
-    } else if (discountSource === 'affiliate' && resolvedAffiliateCode) {
-      await AffiliateCode.findOneAndUpdate(
-        { code: resolvedAffiliateCode },
-        { $inc: { usageCount: 1 } }
-      );
-    }
-
-    // Update negotiation
-    negotiation.status = NEGOTIATION_STATUS.CONVERTED;
-    negotiation.orderId = order._id;
-    await negotiation.save();
-
-    // Increment order count (stock deducted when admin confirms/processes)
-    await Product.findByIdAndUpdate(product._id, {
-      $inc: { orderCount: 1 },
-    });
-
-    // Create payment record
-    const settings = await Settings.getSettings();
-    await Payment.create({
-      orderId: order._id,
-      userId: req.user._id,
-      amount: order.total,
-      upiId: settings.upiId,
-    });
-
-    notifyTeam({
-      type: 'new_order',
-      title: 'New order',
-      body: `${order.customerSnapshot?.name || 'A customer'} placed order ${order.orderNumber} (₹${order.total}).`,
-      link: '/orders',
-      data: { orderId: order._id, orderNumber: order.orderNumber },
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Order created. Please complete payment.',
-      data: {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        discount: order.discount,
-        total: order.total,
-        status: order.status,
-        offerCode: order.offerCode,
-        affiliateCode: order.affiliateCode,
-        discountSource: order.discountSource,
-        upiDetails: {
-          upiId: settings.upiId,
-          displayName: settings.upiDisplayName,
-        },
-      },
-    });
+    const placed = await placeNegotiatedOrder({ user: req.user, negotiations: payable, shippingAddress, customerNote, inputCode });
+    res.status(201).json(negotiatedOrderResponse(placed));
   } catch (error) {
     next(error);
   }

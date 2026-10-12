@@ -6,6 +6,7 @@ const { loadDiscountContext, priceFor } = require('../services/productPricingSer
 const { assertPurchasable } = require('../utils/productAvailability');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
 const { notifyTeam } = require('../services/adminNotificationService');
+const requirementService = require('../services/requirementGroupService');
 
 exports.getMyNegotiations = async (req, res, next) => {
   try {
@@ -33,6 +34,7 @@ exports.getMyNegotiations = async (req, res, next) => {
         image: n.productSnapshot.image,
         currentPrice: n.productSnapshot.price,
       },
+      requestGroup: n.requestGroup?.id ? { id: n.requestGroup.id, number: n.requestGroup.number } : null,
       requestedQuantity: n.requestedQuantity,
       requestedPricePerUnit: n.requestedPricePerUnit,
       requestedTotalPrice: n.requestedTotalPrice,
@@ -41,7 +43,9 @@ exports.getMyNegotiations = async (req, res, next) => {
       status: n.status,
       currentOfferBy: n.currentOfferBy,
       expiresAt: n.expiresAt,
-      canPay: n.status === NEGOTIATION_STATUS.ACCEPTED && !n.orderId,
+      // A requirement is paid for as a whole, not line by line.
+      canPay: n.status === NEGOTIATION_STATUS.ACCEPTED && !n.orderId && !n.requestGroup?.id,
+      orderId: n.orderId || null,
       createdAt: n.createdAt,
     }));
 
@@ -139,7 +143,7 @@ exports.getNegotiationById = async (req, res, next) => {
     }
 
     const data = negotiation.toObject();
-    data.canPay = negotiation.status === NEGOTIATION_STATUS.ACCEPTED && !negotiation.orderId;
+    data.canPay = negotiation.status === NEGOTIATION_STATUS.ACCEPTED && !negotiation.orderId && !negotiation.requestGroup?.id;
 
     res.json({
       success: true,
@@ -215,8 +219,10 @@ exports.acceptOffer = async (req, res, next) => {
       throw new NotFoundError('Negotiation not found', 'NEGOTIATION_NOT_FOUND');
     }
 
-    if (![NEGOTIATION_STATUS.COUNTERED, NEGOTIATION_STATUS.PENDING].includes(negotiation.status)) {
-      throw new BadRequestError('Cannot accept in current status', 'INVALID_NEGOTIATION_STATUS');
+    // Only the dealer's counter can be accepted. Accepting your own pending
+    // offer would close the deal at a price the dealer never agreed to.
+    if (negotiation.status !== NEGOTIATION_STATUS.COUNTERED || negotiation.currentOfferBy !== 'admin') {
+      throw new BadRequestError('There is no dealer offer to accept', 'INVALID_NEGOTIATION_STATUS');
     }
 
     negotiation.history.push({
@@ -278,3 +284,74 @@ exports.rejectNegotiation = async (req, res, next) => {
     next(error);
   }
 };
+
+// ---- Requirements (several products sent together) -----------------------
+
+const groupPayload = (members, summary) => ({
+  requestGroup: { id: members[0].requestGroup.id, number: members[0].requestGroup.number },
+  ...summary,
+  createdAt: members[0].createdAt,
+  expiresAt: members[0].expiresAt,
+  items: members.map((n) => ({
+    id: n._id,
+    negotiationNumber: n.negotiationNumber,
+    product: { id: n.productId, name: n.productSnapshot.name, image: n.productSnapshot.image, currentPrice: n.productSnapshot.price },
+    quantity: n.requestedQuantity,
+    requestedPricePerUnit: n.requestedPricePerUnit,
+    currentPricePerUnit: n.currentPricePerUnit,
+    currentTotalPrice: n.currentTotalPrice,
+    status: n.status,
+    currentOfferBy: n.currentOfferBy,
+    orderId: n.orderId || null,
+  })),
+});
+
+exports.createFromCart = async (req, res, next) => {
+  try {
+    const { requestGroup, negotiations } = await requirementService.createRequirementFromCart({
+      user: req.user,
+      message: req.body.message,
+      offers: req.body.offers,
+    });
+    res.status(201).json({
+      success: true,
+      message: requestGroup ? 'Requirement submitted' : 'Negotiation request submitted',
+      data: {
+        requestGroup,
+        negotiationIds: negotiations.map((n) => n._id),
+        productCount: negotiations.length,
+        expiresAt: negotiations[0].expiresAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getGroup = async (req, res, next) => {
+  try {
+    const members = await requirementService.loadGroup(req.params.groupId, { wholesalerId: req.user._id });
+    res.json({ success: true, data: groupPayload(members, requirementService.summarizeGroup(members)) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.respondToGroup = (action) => async (req, res, next) => {
+  try {
+    const { members, summary } = await requirementService.respondAsWholesaler({
+      user: req.user,
+      groupId: req.params.groupId,
+      action,
+    });
+    res.json({
+      success: true,
+      message: action === 'accept' ? 'Offer accepted. You can now pay for the requirement.' : 'Requirement declined',
+      data: groupPayload(members, summary),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.groupPayload = groupPayload;

@@ -82,6 +82,11 @@ const orderSchema = new mongoose.Schema({
     ref: 'Negotiation',
     default: null,
   },
+  // An order paid for a whole requirement lists every negotiation it settles.
+  negotiationIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Negotiation',
+  }],
 
   items: [orderItemSchema],
 

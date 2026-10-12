@@ -17,7 +17,8 @@ router.post('/google', validate(authValidation.googleAuth), authController.googl
 router.post('/send-otp', validate(authValidation.sendOtp), authController.sendOtp);
 router.post('/verify-phone', validate(authValidation.verifyPhone), authController.verifyPhone);
 router.post('/refresh-token', validate(authValidation.refreshToken), authController.refreshToken);
-router.post('/logout', protect, authController.logout);
+router.post('/logout', protect, validate(authValidation.logout), authController.logout);
+router.put('/preferences', protect, validate(authValidation.updatePreferences), authController.updatePreferences);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
 router.post('/profile/avatar', protect, uploadAvatar.single('avatar'), authController.uploadProfileAvatar);

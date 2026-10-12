@@ -1,5 +1,6 @@
 const { getMessaging } = require('../config/firebase');
-const { Cart, DeviceToken, Notification } = require('../models');
+const { Cart, DeviceToken, Notification, User } = require('../models');
+const { renderTemplate, normalizeLanguage } = require('../utils/notificationTemplates');
 
 function normalizeFcmData(data = {}) {
   return Object.fromEntries(
@@ -167,6 +168,13 @@ class NotificationService {
     }
   }
 
+  // Renders a template in the recipient's language, then sends and stores it.
+  async sendLocalizedToUser(userId, templateKey, params = {}, data = {}) {
+    const user = await User.findById(userId).select('preferredLanguage').lean();
+    const language = normalizeLanguage(user?.preferredLanguage);
+    return this.sendToUser(userId, renderTemplate(templateKey, language, params), data);
+  }
+
   async sendToTopic(topic, notification, data = {}) {
     const messaging = this.getMessagingInstance();
     if (!messaging) {
@@ -249,23 +257,19 @@ class NotificationService {
 
   // Pre-built notification templates
   async sendOrderStatusUpdate(userId, orderId, status) {
-    const statusMessages = {
-      confirmed: { title: 'Order Confirmed!', body: 'Your order has been confirmed and is being processed.' },
-      shipped: { title: 'Order Shipped!', body: 'Your order is on its way!' },
-      delivered: { title: 'Order Delivered!', body: 'Your order has been delivered. Enjoy!' },
-      cancelled: { title: 'Order Cancelled', body: 'Your order has been cancelled.' },
+    const templateByStatus = {
+      confirmed: 'orderConfirmed',
+      shipped: 'orderShipped',
+      delivered: 'orderDelivered',
+      cancelled: 'orderCancelled',
     };
 
-    const notification = statusMessages[status] || {
-      title: 'Order Update',
-      body: `Your order status has been updated to ${status}`,
-    };
-
-    return this.sendToUser(userId, notification, {
-      type: 'order_update',
-      orderId: orderId.toString(),
-      status,
-    });
+    return this.sendLocalizedToUser(
+      userId,
+      templateByStatus[status] || 'orderUpdated',
+      { status },
+      { type: 'order_update', orderId: orderId.toString(), status }
+    );
   }
 
   async sendPriceChange(userId, priceChange) {
@@ -278,21 +282,20 @@ class NotificationService {
       wholesalePrice,
     } = priceChange;
     const customerPriceChanged = Number(previousRetailPrice) !== Number(retailPrice);
-    const body = customerPriceChanged
-      ? `${productName} is now ₹${retailPrice}.`
-      : `${productName} has an updated price.`;
 
-    return this.sendToUser(userId, {
-      title: 'Price Updated',
-      body,
-    }, {
-      type: 'price_change',
-      productId: productId.toString(),
-      previousRetailPrice,
-      retailPrice,
-      previousWholesalePrice,
-      wholesalePrice,
-    });
+    return this.sendLocalizedToUser(
+      userId,
+      customerPriceChanged ? 'priceChanged' : 'priceChangedGeneric',
+      { productName, retailPrice },
+      {
+        type: 'price_change',
+        productId: productId.toString(),
+        previousRetailPrice,
+        retailPrice,
+        previousWholesalePrice,
+        wholesalePrice,
+      }
+    );
   }
 
   async notifyCartOwnersOfPriceChange(priceChange) {
@@ -312,13 +315,12 @@ class NotificationService {
   }
 
   async sendNegotiationUpdate(userId, negotiationId, message) {
-    return this.sendToUser(userId, {
-      title: 'Negotiation Update',
-      body: message,
-    }, {
-      type: 'negotiation_update',
-      negotiationId: negotiationId.toString(),
-    });
+    return this.sendLocalizedToUser(
+      userId,
+      'negotiationUpdate',
+      { message },
+      { type: 'negotiation_update', negotiationId: negotiationId.toString() }
+    );
   }
 
   async sendNewProductAlert(productName, productId) {
@@ -342,25 +344,21 @@ class NotificationService {
   }
 
   async sendPaymentVerified(userId, orderId, orderNumber) {
-    return this.sendToUser(userId, {
-      title: 'Payment Verified!',
-      body: `Your payment for order ${orderNumber} has been verified. We're processing your order now.`,
-    }, {
-      type: 'payment_verified',
-      orderId: orderId.toString(),
-    });
+    return this.sendLocalizedToUser(
+      userId,
+      'paymentVerified',
+      { orderNumber },
+      { type: 'payment_verified', orderId: orderId.toString() }
+    );
   }
 
   async sendPaymentRejected(userId, orderId, orderNumber, reason) {
-    return this.sendToUser(userId, {
-      title: 'Payment Declined',
-      body: reason
-        ? `Your payment for order ${orderNumber} was declined: ${reason}`
-        : `Your payment for order ${orderNumber} was declined. Please re-upload.`,
-    }, {
-      type: 'payment_rejected',
-      orderId: orderId.toString(),
-    });
+    return this.sendLocalizedToUser(
+      userId,
+      reason ? 'paymentRejectedWithReason' : 'paymentRejected',
+      { orderNumber, reason },
+      { type: 'payment_rejected', orderId: orderId.toString() }
+    );
   }
 }
 

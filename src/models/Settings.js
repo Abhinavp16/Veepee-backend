@@ -1,5 +1,16 @@
 const mongoose = require('mongoose');
 
+// Forced-update rule for one platform. The app compares build numbers only;
+// `latestVersion` is display text.
+const platformUpdateSchema = {
+  enabled: { type: Boolean, default: false },
+  latestVersion: { type: String, default: '' },
+  latestBuildNumber: { type: Number, default: 0, min: 0 },
+  storeUrl: { type: String, default: '' },
+  title: { type: String, default: '' },
+  message: { type: String, default: '' },
+};
+
 const settingsSchema = new mongoose.Schema({
   _id: {
     type: String,
@@ -44,6 +55,11 @@ const settingsSchema = new mongoose.Schema({
     negotiationsEnabled: { type: Boolean, default: true },
     guestCheckout: { type: Boolean, default: false },
     maintenanceMode: { type: Boolean, default: false },
+  },
+
+  mobileApp: {
+    android: platformUpdateSchema,
+    ios: platformUpdateSchema,
   },
 
   heroBanners: [{

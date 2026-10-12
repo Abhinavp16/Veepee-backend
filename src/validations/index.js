@@ -11,6 +11,21 @@ const categoryIds = Joi.alternatives().try(
   Joi.string().trim().min(1)
 );
 
+const storeUrl = Joi.string()
+  .uri({ scheme: ['https'] })
+  .pattern(/^https:\/\/(play\.google\.com|apps\.apple\.com)\//)
+  .allow('')
+  .messages({ 'string.pattern.base': 'Store URL must be a Google Play or App Store link' });
+
+const platformUpdate = Joi.object({
+  enabled: Joi.boolean(),
+  latestVersion: Joi.string().allow('').max(32),
+  latestBuildNumber: Joi.number().integer().min(0),
+  storeUrl,
+  title: Joi.string().allow('').max(80),
+  message: Joi.string().allow('').max(300),
+});
+
 const discountRuleSchema = Joi.object({
   minPurchaseAmount: Joi.number().min(0).required(),
   discountType: Joi.string().valid('percentage', 'fixed').required(),
@@ -53,6 +68,10 @@ const authValidation = {
     name: Joi.string().required().max(100),
     phone: indianPhone.required(),
     password: Joi.string().min(6).required(),
+    termsAccepted: Joi.boolean(),
+    privacyPolicyAccepted: Joi.boolean(),
+    termsVersion: Joi.string().max(32),
+    privacyPolicyVersion: Joi.string().max(32),
   }),
 
   registerPhoneWholesaler: Joi.object({
@@ -60,6 +79,14 @@ const authValidation = {
     phone: indianPhone.required(),
     password: Joi.string().min(6).required(),
     businessName: Joi.string().allow('', null).max(200),
+    termsAccepted: Joi.boolean(),
+    privacyPolicyAccepted: Joi.boolean(),
+    termsVersion: Joi.string().max(32),
+    privacyPolicyVersion: Joi.string().max(32),
+  }),
+
+  updatePreferences: Joi.object({
+    language: Joi.string().valid('en', 'hi').required(),
   }),
 
   googleAuth: Joi.object({
@@ -75,6 +102,11 @@ const authValidation = {
   verifyPhone: Joi.object({
     phone: indianPhone.required(),
     otp: Joi.string().length(6).required(),
+  }),
+
+  logout: Joi.object({
+    refreshToken: Joi.string().allow('', null),
+    fcmToken: Joi.string().allow('', null),
   }),
 
   refreshToken: Joi.object({
@@ -387,6 +419,10 @@ const adminValidation = {
     defaultBulkMinQuantity: Joi.number().integer().min(1),
     negotiationExpiryDays: Joi.number().integer().min(1),
     lowStockThreshold: Joi.number().integer().min(0),
+    mobileApp: Joi.object({
+      android: platformUpdate,
+      ios: platformUpdate,
+    }),
     features: Joi.object({
       negotiationsEnabled: Joi.boolean(),
       guestCheckout: Joi.boolean(),

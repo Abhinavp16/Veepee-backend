@@ -42,12 +42,10 @@ const allowedOrigins = [
 ];
 
 const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
-const vercelPreviewPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 
 const isAllowedOrigin = (origin) => {
   if (allowedOrigins.includes(origin)) return true;
   if (localhostOriginPattern.test(origin)) return true;
-  if (vercelPreviewPattern.test(origin)) return true;
   return false;
 };
 

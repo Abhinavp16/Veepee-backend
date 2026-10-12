@@ -13,6 +13,13 @@ exports.registerFcmToken = async (req, res, next) => {
       });
     }
 
+    // A device token belongs to whoever is signed in on it now; stop the
+    // previous account on this device from receiving this user's pushes.
+    await DeviceToken.updateMany(
+      { fcmToken, userId: { $ne: userId } },
+      { $set: { isActive: false } }
+    );
+
     // Upsert: create or reactivate the token
     await DeviceToken.findOneAndUpdate(
       { userId, fcmToken },

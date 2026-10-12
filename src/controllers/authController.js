@@ -1,11 +1,12 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
-const { User, RefreshToken } = require('../models');
+const { User, RefreshToken, DeviceToken } = require('../models');
 const { getStorage } = require('../config/firebase');
 const { UnauthorizedError, ConflictError, BadRequestError } = require('../utils/errors');
 const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 const { sanitizeUser } = require('../utils/helpers');
+const { requireAcceptance, buildAcceptanceFields } = require('../config/legalAcceptance');
 
 const generateTokens = async (userId, deviceInfo) => {
   const accessToken = jwt.sign(
@@ -198,6 +199,12 @@ exports.loginWithPhone = async (req, res, next) => {
 exports.registerWithPhone = async (req, res, next) => {
   try {
     const { name, phone, password } = req.body;
+    if (requireAcceptance() && !(req.body.termsAccepted === true && req.body.privacyPolicyAccepted === true)) {
+      throw new BadRequestError(
+        'Please accept the Terms and Privacy Policy to continue',
+        'TERMS_NOT_ACCEPTED'
+      );
+    }
 
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
@@ -210,6 +217,7 @@ exports.registerWithPhone = async (req, res, next) => {
       passwordHash: password,
       authProvider: AUTH_PROVIDERS.EMAIL,
       role: USER_ROLES.BUYER,
+      ...buildAcceptanceFields(req.body),
     });
 
     const tokens = await generateTokens(user._id, req.headers['user-agent']);
@@ -230,6 +238,12 @@ exports.registerWithPhone = async (req, res, next) => {
 exports.registerWholesalerWithPhone = async (req, res, next) => {
   try {
     const { name, phone, password, businessName } = req.body;
+    if (requireAcceptance() && !(req.body.termsAccepted === true && req.body.privacyPolicyAccepted === true)) {
+      throw new BadRequestError(
+        'Please accept the Terms and Privacy Policy to continue',
+        'TERMS_NOT_ACCEPTED'
+      );
+    }
 
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
@@ -246,6 +260,7 @@ exports.registerWholesalerWithPhone = async (req, res, next) => {
         businessName: businessName || null,
         verified: false,
       },
+      ...buildAcceptanceFields(req.body),
     });
 
     const tokens = await generateTokens(user._id, req.headers['user-agent']);
@@ -400,7 +415,7 @@ exports.refreshToken = async (req, res, next) => {
 
 exports.logout = async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    const { refreshToken, fcmToken } = req.body;
 
     if (refreshToken) {
       await RefreshToken.updateOne(
@@ -409,9 +424,32 @@ exports.logout = async (req, res, next) => {
       );
     }
 
+    // Stop pushes for this user on this device once they sign out.
+    if (fcmToken) {
+      await DeviceToken.updateMany(
+        { userId: req.user._id, fcmToken },
+        { $set: { isActive: false } }
+      );
+    }
+
     res.json({
       success: true,
       message: 'Logged out successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updatePreferences = async (req, res, next) => {
+  try {
+    req.user.preferredLanguage = req.body.language;
+    await req.user.save();
+
+    res.json({
+      success: true,
+      message: 'Preferences updated',
+      data: { language: req.user.preferredLanguage },
     });
   } catch (error) {
     next(error);

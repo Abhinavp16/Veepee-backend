@@ -84,6 +84,19 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // Proof of what the person agreed to at signup.
+  termsAcceptedAt: { type: Date, default: null },
+  termsAcceptedVersion: { type: String, default: null },
+  privacyAcceptedAt: { type: Date, default: null },
+  privacyAcceptedVersion: { type: String, default: null },
+
+  // Language for server-generated text such as push notifications.
+  preferredLanguage: {
+    type: String,
+    enum: ['en', 'hi'],
+    default: 'en',
+  },
+
   isActive: {
     type: Boolean,
     default: true,

@@ -261,6 +261,32 @@ router.get('/health', async (req, res) => {
 });
 
 // Public endpoint for hero banners, promo banners & whatsapp (no auth required)
+// Public forced-update rule. Never cached so a flipped switch applies at once.
+router.get('/settings/mobile-app', async (req, res, next) => {
+  try {
+    const { Settings } = require('../models');
+    const settings = await Settings.getSettings();
+    const pick = (rule = {}) => ({
+      enabled: rule.enabled === true,
+      latestVersion: rule.latestVersion || '',
+      latestBuildNumber: Number(rule.latestBuildNumber) || 0,
+      storeUrl: rule.storeUrl || '',
+      title: rule.title || '',
+      message: rule.message || '',
+    });
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      data: {
+        android: pick(settings.mobileApp?.android),
+        ios: pick(settings.mobileApp?.ios),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/settings/banners', async (req, res, next) => {
   try {
     const { Settings } = require('../models');

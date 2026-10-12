@@ -153,6 +153,8 @@ const productValidation = {
     featured: Joi.boolean(),
     isFeatured: Joi.boolean(),
     isHot: Joi.boolean(),
+    comingSoon: Joi.boolean(),
+    includeComingSoon: Joi.boolean(),
     sort: Joi.string().valid('price', '-price', 'name', '-name', 'createdAt', '-createdAt'),
   }),
 
@@ -163,6 +165,8 @@ const productValidation = {
     category: Joi.string().max(100).allow('', null),
     categorySlug: Joi.string().trim().lowercase().max(100).allow('', null),
     brand: Joi.string().max(200).allow('', null),
+    comingSoon: Joi.boolean(),
+    includeComingSoon: Joi.boolean(),
   }),
 };
 
@@ -261,6 +265,12 @@ const adminValidation = {
     wholesalePrice: Joi.number().min(0).required(),
     minWholesaleQuantity: Joi.number().integer().min(1).default(10),
     negotiationEnabled: Joi.boolean().default(true),
+    priceUnit: Joi.string().valid('piece', 'packet', 'box', 'bundle', 'coil', 'set').default('piece'),
+    packSize: Joi.number().integer().min(1).default(1),
+    minCustomerQuantity: Joi.number().integer().min(1).default(1),
+    comingSoon: Joi.boolean().default(false),
+    expectedLaunchDate: Joi.date().iso().allow(null, ''),
+    hidePriceWhileComingSoon: Joi.boolean().default(false),
     sku: Joi.string().required(),
     stock: Joi.number().integer().min(0).default(0),
     lowStockThreshold: Joi.number().integer().min(0).default(5),
@@ -301,6 +311,12 @@ const adminValidation = {
     wholesalePrice: Joi.forbidden(),
     minWholesaleQuantity: Joi.number().integer().min(1),
     negotiationEnabled: Joi.boolean(),
+    priceUnit: Joi.string().valid('piece', 'packet', 'box', 'bundle', 'coil', 'set'),
+    packSize: Joi.number().integer().min(1),
+    minCustomerQuantity: Joi.number().integer().min(1),
+    comingSoon: Joi.boolean(),
+    expectedLaunchDate: Joi.date().iso().allow(null, ''),
+    hidePriceWhileComingSoon: Joi.boolean(),
     stock: Joi.number().integer().min(0),
     lowStockThreshold: Joi.number().integer().min(0),
     images: Joi.array().items(Joi.object({
@@ -402,6 +418,11 @@ const adminValidation = {
   rejectPayment: Joi.object({
     reason: Joi.string().required().max(500),
   }),
+
+  setDiscount: Joi.object({
+    customerDiscountPercent: Joi.number().min(0).max(99),
+    wholesalerDiscountPercent: Joi.number().min(0).max(99),
+  }).or('customerDiscountPercent', 'wholesalerDiscountPercent'),
 
   updateSettings: Joi.object({
     businessName: Joi.string().max(200),

@@ -27,6 +27,10 @@ const companySchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // Percent off MRP for each audience. Hidden from normal reads; managed
+  // through the admin discounts API and applied by the pricing service.
+  customerDiscountPercent: { type: Number, min: 0, max: 99, default: 0, select: false },
+  wholesalerDiscountPercent: { type: Number, min: 0, max: 99, default: 0, select: false },
   isActive: {
     type: Boolean,
     default: true,

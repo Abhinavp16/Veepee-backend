@@ -2,6 +2,9 @@ const { Negotiation, Product, Settings } = require('../models');
 const { NotFoundError, BadRequestError, ForbiddenError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { NEGOTIATION_STATUS, NEGOTIATION_ACTIONS, USER_ROLES } = require('../utils/constants');
+const { loadDiscountContext, priceFor } = require('../services/productPricingService');
+const { assertPurchasable } = require('../utils/productAvailability');
+const { assertQuantityAllowed } = require('../utils/quantityRules');
 
 exports.getMyNegotiations = async (req, res, next) => {
   try {
@@ -59,9 +62,12 @@ exports.createNegotiation = async (req, res, next) => {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
+    assertPurchasable(product);
     if (!product.negotiationEnabled) {
       throw new BadRequestError('Negotiation is not enabled for this product', 'NEGOTIATION_DISABLED');
     }
+    assertQuantityAllowed(product, quantity, USER_ROLES.WHOLESALER);
+    const ctx = await loadDiscountContext([product]);
 
     const settings = await Settings.getSettings();
     const expiresAt = new Date();
@@ -74,7 +80,7 @@ exports.createNegotiation = async (req, res, next) => {
       productId,
       productSnapshot: {
         name: product.name,
-        price: product.retailPrice,
+        price: priceFor(product, USER_ROLES.WHOLESALER, ctx).price,
         image: product.primaryImage,
         sku: product.sku,
       },

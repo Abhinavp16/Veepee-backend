@@ -1,89 +1,20 @@
 const { Cart, Product } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 
-// Helper to get price based on user role
-const getPriceForUser = (product, userRole) => {
-  if (userRole === 'wholesaler') {
-    return {
-      price: product.wholesalePrice,
-      retailPrice: product.retailPrice,
-      wholesalePrice: product.wholesalePrice,
-    };
-  }
-  // For buyers - show retail price
-  return {
-    price: product.retailPrice,
-    retailPrice: product.retailPrice,
-  };
-};
+const { loadDiscountContext, priceFor } = require('../services/productPricingService');
+const { assertPurchasable, isComingSoon } = require('../utils/productAvailability');
+const { assertQuantityAllowed, quantityRules } = require('../utils/quantityRules');
 
-exports.getCart = async (req, res, next) => {
-  try {
-    const userRole = req.user?.role || 'guest';
-    let cart = await Cart.findOne({ userId: req.user._id });
-
-    if (!cart) {
-      cart = await Cart.create({ userId: req.user._id, items: [] });
-    }
-
-    const productIds = cart.items.map(item => item.productId);
-    const products = await Product.find({ _id: { $in: productIds } })
-      .select('name nameHindi slug retailPrice wholesalePrice stock images')
-      .lean();
-
-    const productMap = products.reduce((acc, p) => {
-      acc[p._id.toString()] = p;
-      return acc;
-    }, {});
-
-    const items = cart.items.map(item => {
-      const product = productMap[item.productId.toString()];
-      if (!product) return null;
-
-      const pricing = getPriceForUser(product, userRole);
-      const currentPrice = pricing.price;
-
-      return {
-        productId: item.productId,
-        product: {
-          name: product.name,
-          nameHindi: product.nameHindi,
-          slug: product.slug,
-          price: pricing.price,
-          retailPrice: pricing.retailPrice,
-          wholesalePrice: pricing.wholesalePrice,
-          stock: product.stock,
-          image: product.images?.find(img => img.isPrimary)?.url || product.images?.[0]?.url,
-        },
-        quantity: item.quantity,
-        priceAtAdd: item.priceAtAdd,
-        currentPrice: currentPrice,
-        priceChanged: item.priceAtAdd !== currentPrice,
-        itemTotal: item.quantity * currentPrice,
-      };
-    }).filter(Boolean);
-
-    const subtotal = items.reduce((sum, item) => sum + item.itemTotal, 0);
-    const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-
-    res.json({
-      success: true,
-      data: {
-        items,
-        subtotal,
-        itemCount,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+const CART_PRODUCT_FIELDS =
+  'name nameHindi slug mrp retailPrice wholesalePrice stock images status company categoryIds primaryCategoryId packSize priceUnit minWholesaleQuantity minCustomerQuantity comingSoon expectedLaunchDate';
 
 const populateCartItems = async (cart, userRole = 'guest') => {
   const productIds = cart.items.map(item => item.productId);
   const products = await Product.find({ _id: { $in: productIds } })
-    .select('name nameHindi slug retailPrice wholesalePrice stock images')
+    .select(CART_PRODUCT_FIELDS)
     .lean();
+  const ctx = await loadDiscountContext(products);
+  const now = new Date();
 
   const productMap = products.reduce((acc, p) => {
     acc[p._id.toString()] = p;
@@ -94,8 +25,9 @@ const populateCartItems = async (cart, userRole = 'guest') => {
     const product = productMap[item.productId.toString()];
     if (!product) return null;
 
-    const pricing = getPriceForUser(product, userRole);
-    const currentPrice = pricing.price;
+    const own = priceFor(product, userRole, ctx);
+    const rules = quantityRules(product, userRole);
+    const currentPrice = own.price;
 
     return {
       productId: item.productId,
@@ -103,11 +35,19 @@ const populateCartItems = async (cart, userRole = 'guest') => {
         name: product.name,
         nameHindi: product.nameHindi,
         slug: product.slug,
-        price: pricing.price,
-        retailPrice: pricing.retailPrice,
-        wholesalePrice: pricing.wholesalePrice,
+        price: own.price,
+        mrp: own.mrp,
+        retailPrice: priceFor(product, 'buyer', ctx).price,
+        wholesalePrice: userRole === 'wholesaler' ? own.price : undefined,
+        discountPercent: own.discountPercent,
         stock: product.stock,
         image: product.images?.find(img => img.isPrimary)?.url || product.images?.[0]?.url,
+        packSize: rules.packSize,
+        priceUnit: product.priceUnit || 'piece',
+        minQuantity: rules.min,
+        quantityStep: rules.step,
+        // Present in the cart but not orderable right now.
+        unavailable: product.status !== 'active' || isComingSoon(product, now),
       },
       quantity: item.quantity,
       priceAtAdd: item.priceAtAdd,
@@ -122,6 +62,24 @@ const populateCartItems = async (cart, userRole = 'guest') => {
   return { items, subtotal, itemCount };
 };
 
+exports.getCart = async (req, res, next) => {
+  try {
+    const userRole = req.user?.role || 'guest';
+    let cart = await Cart.findOne({ userId: req.user._id });
+
+    if (!cart) {
+      cart = await Cart.create({ userId: req.user._id, items: [] });
+    }
+
+    res.json({
+      success: true,
+      data: await populateCartItems(cart, userRole),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.addItem = async (req, res, next) => {
   try {
     const userRole = req.user?.role || 'guest';
@@ -131,18 +89,23 @@ exports.addItem = async (req, res, next) => {
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
-
-    if (product.stock < quantity) {
-      throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
-    }
-
-    const pricing = getPriceForUser(product, userRole);
-    const priceToUse = pricing.price;
+    assertPurchasable(product);
 
     let cart = await Cart.findOne({ userId: req.user._id });
     if (!cart) {
       cart = new Cart({ userId: req.user._id, items: [] });
     }
+
+    // Rules apply to what the cart will hold, not just this one addition.
+    const existing = cart.items.find(item => item.productId.toString() === String(productId));
+    const totalQuantity = (existing?.quantity || 0) + quantity;
+    assertQuantityAllowed(product, totalQuantity, userRole);
+    if (product.stock < totalQuantity) {
+      throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
+    }
+
+    const ctx = await loadDiscountContext([product]);
+    const priceToUse = priceFor(product, userRole, ctx).price;
 
     cart.addItem(productId, quantity, priceToUse);
     await cart.save();
@@ -168,6 +131,8 @@ exports.updateItemQuantity = async (req, res, next) => {
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
+    assertPurchasable(product);
+    assertQuantityAllowed(product, quantity, userRole);
 
     if (product.stock < quantity) {
       throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
@@ -225,8 +190,10 @@ exports.validateCart = async (req, res, next) => {
 
     const productIds = cart.items.map(item => item.productId);
     const products = await Product.find({ _id: { $in: productIds } })
-      .select('name stock retailPrice status')
+      .select('name stock retailPrice status comingSoon expectedLaunchDate packSize minWholesaleQuantity minCustomerQuantity')
       .lean();
+    const role = req.user?.role;
+    const now = new Date();
 
     const productMap = products.reduce((acc, p) => {
       acc[p._id.toString()] = p;
@@ -255,6 +222,31 @@ exports.validateCart = async (req, res, next) => {
           message: `${product.name} is currently unavailable`,
           availableStock: 0,
           requestedQty: item.quantity,
+        });
+        continue;
+      }
+      if (isComingSoon(product, now)) {
+        issues.push({
+          productId: item.productId.toString(),
+          name: product.name,
+          type: 'coming_soon',
+          message: `${product.name} is coming soon and cannot be ordered yet`,
+          availableStock: 0,
+          requestedQty: item.quantity,
+        });
+        continue;
+      }
+      const rules = quantityRules(product, role);
+      if (item.quantity < rules.min || item.quantity % rules.step !== 0) {
+        issues.push({
+          productId: item.productId.toString(),
+          name: product.name,
+          type: 'invalid_quantity',
+          message: `${product.name} must be ordered ${rules.step > 1 ? `in multiples of ${rules.step}, ` : ''}at least ${rules.min}`,
+          availableStock: product.stock,
+          requestedQty: item.quantity,
+          minQuantity: rules.min,
+          quantityStep: rules.step,
         });
         continue;
       }

@@ -97,6 +97,32 @@ const productSchema = new mongoose.Schema({
     default: true,
   },
 
+  // Selling units. `minWholesaleQuantity` counts packs; a wholesaler's step is
+  // one pack of `packSize` pieces. Customers buy single pieces, at least
+  // `minCustomerQuantity`.
+  priceUnit: {
+    type: String,
+    enum: ['piece', 'packet', 'box', 'bundle', 'coil', 'set'],
+    default: 'piece',
+  },
+  packSize: {
+    type: Number,
+    default: 1,
+    min: [1, 'Pack size must be at least 1'],
+  },
+  minCustomerQuantity: {
+    type: Number,
+    default: 1,
+    min: [1, 'Minimum customer quantity must be at least 1'],
+  },
+
+  // Coming soon: visible to shoppers but not orderable. It ends when an admin
+  // switches it off, or automatically once `expectedLaunchDate` has passed and
+  // there is stock.
+  comingSoon: { type: Boolean, default: false },
+  expectedLaunchDate: { type: Date, default: null },
+  hidePriceWhileComingSoon: { type: Boolean, default: false },
+
   sku: {
     type: String,
     required: [true, 'SKU is required'],
@@ -215,6 +241,7 @@ productSchema.index({ primaryCategoryId: 1, status: 1 });
 productSchema.index({ company: 1, categoryIds: 1, status: 1 });
 productSchema.index({ company: 1, category: 1, status: 1 });
 productSchema.index({ status: 1, isFeatured: -1 });
+productSchema.index({ comingSoon: 1, expectedLaunchDate: 1 });
 productSchema.index({ retailPrice: 1 });
 productSchema.index({ wholesalePrice: 1 });
 productSchema.index({ stock: 1 });

@@ -33,6 +33,10 @@ const categorySchema = new mongoose.Schema({
     default: 1,
     min: [1, 'Order must be at least 1'],
   },
+  // Percent off MRP for each audience. Hidden from normal reads; managed
+  // through the admin discounts API and applied by the pricing service.
+  customerDiscountPercent: { type: Number, min: 0, max: 99, default: 0, select: false },
+  wholesalerDiscountPercent: { type: Number, min: 0, max: 99, default: 0, select: false },
   isActive: {
     type: Boolean,
     default: true,

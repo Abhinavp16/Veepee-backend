@@ -442,6 +442,16 @@ router.get('/internal/cron/price-changes', cronAuth, async (req, res, next) => {
   }
 });
 
+// Scheduled job: everything that runs once a day (Vercel Cron).
+router.get('/internal/cron/daily', cronAuth, async (req, res, next) => {
+  try {
+    const { runDailyJobs } = require('../services/dailyJobs');
+    res.json({ success: true, data: await runDailyJobs() });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Public endpoint for active reviews (no auth required)
 router.get('/reviews', async (req, res, next) => {
   try {

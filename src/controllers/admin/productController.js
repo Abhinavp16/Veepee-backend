@@ -7,6 +7,7 @@ const { getStorage } = require('../../config/firebase');
 const { transliterateToHindi } = require('../../services/hindiTransliterationService');
 const { PRODUCT_STATUS } = require('../../utils/constants');
 const { updateProductCount } = require('../categoryController');
+const { notifyLaunchAlerts } = require('../../services/productLaunchService');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const slugify = require('slugify');
@@ -278,6 +279,7 @@ exports.updateProduct = async (req, res, next) => {
       ? product.categoryIds.map(String)
       : [product.category].filter(Boolean);
     const updateData = { ...req.body };
+    const wasComingSoon = product.comingSoon === true;
 
     const assignment = await resolveCategoryAssignment(updateData, product);
     await validateCompanyCategoryAssignment(updateData, product, assignment);
@@ -317,6 +319,15 @@ exports.updateProduct = async (req, res, next) => {
 
     Object.assign(product, updateData);
     await product.save();
+
+    // Switching "coming soon" off is the launch: tell everyone who asked.
+    if (wasComingSoon && !product.comingSoon && product.status === 'active') {
+      try {
+        await notifyLaunchAlerts(product);
+      } catch (error) {
+        console.error('Failed to send launch alerts:', error);
+      }
+    }
     await updateProductCount([
       ...previousCategories,
       ...(product.categoryIds?.length ? product.categoryIds.map(String) : [product.category]),

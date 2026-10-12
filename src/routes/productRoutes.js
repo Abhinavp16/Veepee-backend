@@ -11,6 +11,8 @@ router.get('/featured', optionalAuth, productController.getFeaturedProducts);
 router.get('/search', optionalAuth, validate(productValidation.search, 'query'), productController.searchProducts);
 router.get('/:id/related', optionalAuth, productController.getRelatedProducts);
 router.get('/:slug', optionalAuth, productController.getProductBySlug);
+router.post('/:id/notify-me', protect, authorize('buyer', 'wholesaler'), productController.subscribeToLaunch);
+router.delete('/:id/notify-me', protect, authorize('buyer', 'wholesaler'), productController.unsubscribeFromLaunch);
 router.post('/:id/view', optionalAuth, productController.trackProductView);
 router.post('/:id/event', optionalAuth, productController.trackProductEvent);
 router.patch('/:id/hindi-name', protect, authorize('admin'), productController.updateProductNameHindi);

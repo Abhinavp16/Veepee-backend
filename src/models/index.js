@@ -10,6 +10,7 @@ const RefreshToken = require('./RefreshToken');
 const Company = require('./Company');
 const StockLog = require('./StockLog');
 const DeviceToken = require('./DeviceToken');
+const ProductAlert = require('./ProductAlert');
 const Notification = require('./Notification');
 const Offer = require('./Offer');
 const AffiliateCode = require('./AffiliateCode');
@@ -33,6 +34,7 @@ module.exports = {
   Company,
   StockLog,
   DeviceToken,
+  ProductAlert,
   Notification,
   Offer,
   AffiliateCode,

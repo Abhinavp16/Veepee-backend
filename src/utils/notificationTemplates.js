@@ -59,6 +59,10 @@ const TEMPLATES = {
       body: 'ऑर्डर {orderNumber} का आपका पेमेंट अस्वीकृत हुआ: {reason}',
     },
   },
+  productLaunched: {
+    en: { title: 'Now available!', body: '{productName} is now available on OXON.' },
+    hi: { title: 'अब उपलब्ध!', body: '{productName} अब OXON पर उपलब्ध है।' },
+  },
   negotiationUpdate: {
     en: { title: 'Negotiation Update', body: '{message}' },
     hi: { title: 'मोलभाव अपडेट', body: '{message}' },

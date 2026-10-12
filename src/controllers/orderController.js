@@ -3,21 +3,9 @@ const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
 
-// Helper to get price based on user role
-const getPriceForUser = (product, userRole) => {
-  if (userRole === 'wholesaler') {
-    return {
-      price: product.wholesalePrice,
-      retailPrice: product.retailPrice,
-      wholesalePrice: product.wholesalePrice,
-    };
-  }
-  // For buyers - show retail price
-  return {
-    price: product.retailPrice,
-    retailPrice: product.retailPrice,
-  };
-};
+const { loadDiscountContext, priceFor } = require('../services/productPricingService');
+const { assertPurchasable } = require('../utils/productAvailability');
+const { assertQuantityAllowed } = require('../utils/quantityRules');
 
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
@@ -206,14 +194,16 @@ const resolveCouponDiscount = async ({ couponCode, subtotal, userRole }) => {
   };
 };
 
-const getCurrentCartPricing = async (userId) => {
+const getCurrentCartPricing = async (userId, userRole) => {
   const cart = await Cart.findOne({ userId });
   if (!cart || cart.items.length === 0) {
     throw new BadRequestError('Cart is empty', 'CART_EMPTY');
   }
 
   const productIds = cart.items.map(item => item.productId);
-  const products = await Product.find({ _id: { $in: productIds } }).select('retailPrice');
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select('mrp retailPrice wholesalePrice company categoryIds primaryCategoryId');
+  const ctx = await loadDiscountContext(products);
   const productMap = products.reduce((acc, p) => {
     acc[p._id.toString()] = p;
     return acc;
@@ -225,7 +215,7 @@ const getCurrentCartPricing = async (userId) => {
   for (const item of cart.items) {
     const product = productMap[item.productId.toString()];
     if (!product) continue;
-    subtotal += product.retailPrice * item.quantity;
+    subtotal += priceFor(product, userRole, ctx).price * item.quantity;
     itemCount += item.quantity;
   }
 
@@ -250,7 +240,7 @@ exports.previewCouponForCart = async (req, res, next) => {
       itemCount = 1;
     } else {
       // Cart flow - get from cart
-      const cartPricing = await getCurrentCartPricing(req.user._id);
+      const cartPricing = await getCurrentCartPricing(req.user._id, req.user.role);
       subtotal = cartPricing.subtotal;
       itemCount = cartPricing.itemCount;
     }
@@ -378,6 +368,7 @@ exports.createOrderFromCart = async (req, res, next) => {
     }
 
     const products = await Product.find({ _id: { $in: productIds } });
+    const ctx = await loadDiscountContext(products);
     const productMap = products.reduce((acc, p) => {
       acc[p._id.toString()] = p;
       return acc;
@@ -395,6 +386,11 @@ exports.createOrderFromCart = async (req, res, next) => {
       const product = productMap[item.productId.toString()];
       if (!product) continue;
 
+      // Draft, archived and coming-soon products cannot be ordered, and the
+      // quantity must follow the product's minimum and pack rules.
+      assertPurchasable(product);
+      assertQuantityAllowed(product, item.quantity, userRole);
+
       if (product.stock < item.quantity) {
         stockIssues.push({
           productId: item.productId.toString(),
@@ -409,8 +405,7 @@ exports.createOrderFromCart = async (req, res, next) => {
       }
 
       // Get role-based pricing
-      const pricing = getPriceForUser(product, userRole);
-      const pricePerUnit = pricing.price;
+      const pricePerUnit = priceFor(product, userRole, ctx).price;
       const itemTotal = pricePerUnit * item.quantity;
 
       orderItems.push({
@@ -564,6 +559,7 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
+    assertPurchasable(product);
     if (product.stock < negotiation.requestedQuantity) {
       throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
     }

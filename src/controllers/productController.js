@@ -1,5 +1,5 @@
-const { Product, Analytics, WebsiteSettings, Company, Category } = require('../models');
-const { NotFoundError } = require('../utils/errors');
+const { Product, Analytics, WebsiteSettings, Company, Category, ProductAlert } = require('../models');
+const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS, ANALYTICS_EVENTS } = require('../utils/constants');
 const mongoose = require('mongoose');
@@ -10,27 +10,54 @@ const {
   getCategoryAndDescendants,
   productCategoryPopulate,
 } = require('../utils/categoryHelpers');
+const { loadDiscountContext, pricingForUser } = require('../services/productPricingService');
+const { quantityRules } = require('../utils/quantityRules');
+const {
+  isComingSoon,
+  comingSoonFilter,
+  notComingSoonFilter,
+  comingSoonPayload,
+} = require('../utils/productAvailability');
 
-// Helper to get price based on user role
-const getPriceForUser = (product, userRole) => {
-  if (userRole === 'wholesaler') {
-    return {
-      price: product.wholesalePrice,
-      mrp: product.mrp,
-      retailPrice: product.retailPrice,
-      wholesalePrice: product.wholesalePrice,
-      minWholesaleQuantity: product.minWholesaleQuantity,
-      negotiationEnabled: product.negotiationEnabled,
-      canNegotiate: true,
-    };
-  }
-  // For buyers and guests - show retail price
-  return {
-    price: product.retailPrice,
-    mrp: product.mrp,
-    canNegotiate: false,
+// Fields every product response needs beyond the raw document: the price the
+// shopper pays, how many they may order, and any coming-soon state.
+const SHOPPER_FIELDS =
+  'packSize priceUnit minCustomerQuantity comingSoon expectedLaunchDate hidePriceWhileComingSoon';
+
+const shopperBlock = (product, role, ctx, now) => {
+  const pricing = pricingForUser(product, role, ctx);
+  const rules = quantityRules(product, role);
+  const comingSoon = comingSoonPayload(product, now);
+  const block = {
+    ...pricing,
+    packSize: rules.packSize,
+    priceUnit: product.priceUnit || 'piece',
+    minQuantity: rules.min,
+    quantityStep: rules.step,
+    comingSoon: Boolean(comingSoon),
+    expectedLaunchDate: comingSoon?.expectedLaunchDate || null,
+    priceHidden: Boolean(comingSoon?.priceHidden),
   };
+  if (block.priceHidden) {
+    for (const key of ['price', 'mrp', 'retailPrice', 'wholesalePrice']) {
+      if (key in block) block[key] = null;
+    }
+    block.discountPercent = 0;
+  }
+  return block;
 };
+
+// Lists hide coming-soon products unless asked: `comingSoon=true` returns only
+// those, `includeComingSoon=true` returns both.
+const comingSoonListCondition = (query, now) => {
+  if (isTrue(query.comingSoon)) return comingSoonFilter(now);
+  if (isTrue(query.includeComingSoon)) return null;
+  return notComingSoonFilter(now);
+};
+
+// Query values arrive already converted to booleans by validation, but accept
+// the raw string too.
+const isTrue = (value) => value === true || value === 'true';
 
 const categoryResponse = (product) => ({
   categories: Array.isArray(product.categoryIds) ? product.categoryIds : [],
@@ -94,9 +121,11 @@ exports.getProducts = async (req, res, next) => {
     
     if (minPrice) query[priceField] = { ...query[priceField], $gte: Number(minPrice) };
     if (maxPrice) query[priceField] = { ...query[priceField], $lte: Number(maxPrice) };
-    if (inStock === 'true') query.stock = { $gt: 0 };
-    if (featured === 'true' || isFeatured === 'true') query.isFeatured = true;
-    if (isHot === 'true') query.isHot = true;
+    if (isTrue(inStock)) query.stock = { $gt: 0 };
+    if (isTrue(featured) || isTrue(isFeatured)) query.isFeatured = true;
+    if (isTrue(isHot)) query.isHot = true;
+    const visibility = comingSoonListCondition(req.query, new Date());
+    if (visibility) andConditions.push(visibility);
     if (andConditions.length > 0) query.$and = andConditions;
 
     console.log('getProducts final query:', JSON.stringify(query));
@@ -112,7 +141,7 @@ exports.getProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax company')
+        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
         .populate('company', 'name')
         .populate(productCategoryPopulate)
         .sort(sortOption)
@@ -122,8 +151,10 @@ exports.getProducts = async (req, res, next) => {
       Product.countDocuments(query),
     ]);
 
+    const ctx = await loadDiscountContext(products);
+    const now = new Date();
     const formattedProducts = products.map(p => {
-      const pricing = getPriceForUser(p, userRole);
+      const pricing = shopperBlock(p, userRole, ctx, now);
       return {
         id: p._id,
         name: p.name,
@@ -177,7 +208,9 @@ exports.getProductBySlug = async (req, res, next) => {
     }
 
     // Build response with role-based pricing
-    const pricing = getPriceForUser(product, userRole);
+    const ctx = await loadDiscountContext([product]);
+    const now = new Date();
+    const pricing = shopperBlock(product, userRole, ctx, now);
     let resolvedLabels = [];
     if (Array.isArray(product.labelIds) && product.labelIds.length > 0) {
       const settings = await WebsiteSettings.getSettings();
@@ -228,6 +261,12 @@ exports.getProductBySlug = async (req, res, next) => {
       labels: resolvedLabels,
     };
 
+    if (pricing.comingSoon && req.user) {
+      responseData.notifyMe = Boolean(
+        await ProductAlert.exists({ userId: req.user._id, productId: product._id })
+      );
+    }
+
     // Remove raw price fields for non-admin users, but keep for wholesalers so they can see customer price
     if (userRole !== 'admin' && userRole !== 'wholesaler') {
       delete responseData.retailPrice;
@@ -253,6 +292,47 @@ exports.getProductBySlug = async (req, res, next) => {
       success: true,
       data: responseData,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const loadComingSoonProduct = async (id) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+  }
+  const product = await Product.findOne({ _id: id, status: PRODUCT_STATUS.ACTIVE })
+    .select('status stock comingSoon expectedLaunchDate')
+    .lean();
+  if (!product) throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+  return product;
+};
+
+// "Notify me when available" for a coming-soon product.
+exports.subscribeToLaunch = async (req, res, next) => {
+  try {
+    const product = await loadComingSoonProduct(req.params.id);
+    if (!isComingSoon(product)) {
+      throw new BadRequestError('This product is already available', 'PRODUCT_NOT_COMING_SOON');
+    }
+    await ProductAlert.updateOne(
+      { userId: req.user._id, productId: product._id },
+      { $setOnInsert: { createdAt: new Date() } },
+      { upsert: true }
+    );
+    res.json({ success: true, data: { notifyMe: true } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.unsubscribeFromLaunch = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+    }
+    await ProductAlert.deleteOne({ userId: req.user._id, productId: req.params.id });
+    res.json({ success: true, data: { notifyMe: false } });
   } catch (error) {
     next(error);
   }
@@ -295,15 +375,18 @@ exports.getFeaturedProducts = async (req, res, next) => {
     const products = await Product.find({
       status: PRODUCT_STATUS.ACTIVE,
       isFeatured: true,
+      ...notComingSoonFilter(new Date()),
     })
-      .select('name slug shortDescription category categoryIds primaryCategoryId mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax')
+      .select(`name slug shortDescription category categoryIds primaryCategoryId mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
       .populate(productCategoryPopulate)
       .sort({ createdAt: -1, _id: -1 })
       .limit(10)
       .lean();
 
+    const ctx = await loadDiscountContext(products);
+    const now = new Date();
     const formattedProducts = products.map(p => {
-      const pricing = getPriceForUser(p, userRole);
+      const pricing = shopperBlock(p, userRole, ctx, now);
       return {
         id: p._id,
         name: p.name,
@@ -402,6 +485,9 @@ exports.searchProducts = async (req, res, next) => {
       });
     }
 
+    const visibility = comingSoonListCondition(req.query, new Date());
+    if (visibility) andConditions.push(visibility);
+
     if (andConditions.length > 0) {
       query.$and = andConditions;
     }
@@ -410,7 +496,7 @@ exports.searchProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select('name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company')
+        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
         .populate('company', 'name')
         .populate(productCategoryPopulate)
         .sort({ createdAt: -1, _id: -1 })
@@ -420,8 +506,10 @@ exports.searchProducts = async (req, res, next) => {
       Product.countDocuments(query),
     ]);
 
+    const ctx = await loadDiscountContext(products);
+    const now = new Date();
     const formattedProducts = products.map(p => {
-      const pricing = getPriceForUser(p, userRole);
+      const pricing = shopperBlock(p, userRole, ctx, now);
       return {
         id: p._id,
         name: p.name,
@@ -581,20 +669,20 @@ exports.getRelatedProducts = async (req, res, next) => {
 
     const relatedProducts = await Product.find({
       status: 'active',
-      ...relatedCategoryCondition,
+      $and: [relatedCategoryCondition, notComingSoonFilter(new Date())],
       _id: { $ne: currentProduct._id }
     })
-      .select('name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images rating isFeatured isHot isNew purchaseCountMin purchaseCountMax company')
+      .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images rating isFeatured isHot isNew purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
       .populate('company', 'name')
       .populate(productCategoryPopulate)
       .sort({ isFeatured: -1, createdAt: -1, _id: -1 })
       .limit(limit)
       .lean();
 
+    const ctx = await loadDiscountContext(relatedProducts);
+    const now = new Date();
     const formattedProducts = relatedProducts.map(p => {
-      const pricing = userRole === 'wholesaler'
-        ? { price: p.wholesalePrice, mrp: p.mrp, retailPrice: p.retailPrice, wholesalePrice: p.wholesalePrice, minWholesaleQuantity: p.minWholesaleQuantity }
-        : { price: p.retailPrice, mrp: p.mrp };
+      const pricing = shopperBlock(p, userRole, ctx, now);
       return {
         id: p._id,
         name: p.name,

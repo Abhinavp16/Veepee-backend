@@ -11,6 +11,7 @@ const adminOrderController = require('../controllers/admin/orderController');
 const adminPaymentController = require('../controllers/admin/paymentController');
 const adminAnalyticsController = require('../controllers/admin/analyticsController');
 const adminSettingsController = require('../controllers/admin/settingsController');
+const adminDiscountController = require('../controllers/admin/discountController');
 const websiteSettingsController = require('../controllers/admin/websiteSettingsController');
 const adminCustomerController = require('../controllers/admin/customerController');
 const adminOfferController = require('../controllers/admin/offerController');
@@ -96,6 +97,9 @@ router.get('/analytics/products', administrator, adminAnalyticsController.getPro
 router.get('/analytics/sales', administrator, adminAnalyticsController.getSalesAnalytics);
 router.get('/analytics/demand', administrator, adminAnalyticsController.getDemandInsights);
 router.get('/analytics/potential-customers', administrator, adminAnalyticsController.getPotentialCustomers);
+
+router.get('/discounts', administrator, adminDiscountController.listDiscounts);
+router.put('/discounts/:kind/:id', administrator, validate(adminValidation.setDiscount), adminDiscountController.setDiscount);
 
 router.get('/settings', administrator, adminSettingsController.getSettings);
 router.put('/settings', administrator, validate(adminValidation.updateSettings), adminSettingsController.updateSettings);

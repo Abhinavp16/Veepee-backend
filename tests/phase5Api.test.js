@@ -125,6 +125,9 @@ async function run() {
     res = await call('GET', `/products?limit=50`, { token: buyer.token });
     assert.strictEqual(res.json.data.find((p) => String(p.id) === String(product._id)).pendingPriceChange.newPrice, 800, 'lists carry it too');
 
+    res = await call('GET', '/cart', { token: buyer.token });
+    assert.strictEqual(res.json.data.items[0].product.pendingPriceChange.newPrice, 800, 'the cart warns too');
+
     // A brand discount sets the price regardless, so there is nothing to warn about.
     const brand = await Company.create({ name: `P5 Brand ${suffix}`, customerDiscountPercent: 10 });
     made.companies.push(brand._id);

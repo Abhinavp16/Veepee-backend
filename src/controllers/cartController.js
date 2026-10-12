@@ -1,12 +1,12 @@
 const { Cart, Product } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 
-const { loadDiscountContext, priceFor } = require('../services/productPricingService');
+const { loadDiscountContext, priceFor, pendingPriceNotice } = require('../services/productPricingService');
 const { assertPurchasable, isComingSoon } = require('../utils/productAvailability');
 const { assertQuantityAllowed, quantityRules } = require('../utils/quantityRules');
 
 const CART_PRODUCT_FIELDS =
-  'name nameHindi slug mrp retailPrice wholesalePrice stock images status company categoryIds primaryCategoryId packSize priceUnit minWholesaleQuantity minCustomerQuantity comingSoon expectedLaunchDate';
+  'name nameHindi slug mrp retailPrice wholesalePrice stock images status company categoryIds primaryCategoryId packSize priceUnit minWholesaleQuantity minCustomerQuantity comingSoon expectedLaunchDate pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
 
 const populateCartItems = async (cart, userRole = 'guest') => {
   const productIds = cart.items.map(item => item.productId);
@@ -48,6 +48,7 @@ const populateCartItems = async (cart, userRole = 'guest') => {
         quantityStep: rules.step,
         // Present in the cart but not orderable right now.
         unavailable: product.status !== 'active' || isComingSoon(product, now),
+        pendingPriceChange: pendingPriceNotice(product, userRole, own, now),
       },
       quantity: item.quantity,
       priceAtAdd: item.priceAtAdd,

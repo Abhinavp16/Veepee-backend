@@ -92,4 +92,22 @@ const pricingForUser = (product, role, ctx) => {
   return { price: own.price, mrp: own.mrp, canNegotiate: false, discountPercent: own.discountPercent };
 };
 
-module.exports = { loadDiscountContext, resolveDiscount, priceFor, pricingForUser, round2 };
+// A scheduled price change the shopper can be warned about: the price they
+// would pay, when it starts. Nothing when there is none, when it is not a
+// change for them, when a brand/category discount sets their price anyway, or
+// when it is already due (the daily job applies it).
+const pendingPriceNotice = (product, role, pricing, now = new Date()) => {
+  if (!product.priceChangeEffectiveAt || new Date(product.priceChangeEffectiveAt) <= now) return null;
+  if ((pricing.discountPercent || 0) > 0) return null;
+  const newPrice = role === 'wholesaler' ? product.pendingWholesalePrice : product.pendingRetailPrice;
+  if (newPrice == null || pricing.price == null || Number(newPrice) === Number(pricing.price)) return null;
+  return {
+    currentPrice: pricing.price,
+    newPrice: Number(newPrice),
+    effectiveAt: product.priceChangeEffectiveAt,
+    scheduledAt: product.priceChangeScheduledAt || null,
+  };
+};
+
+
+module.exports = { pendingPriceNotice, loadDiscountContext, resolveDiscount, priceFor, pricingForUser, round2 };

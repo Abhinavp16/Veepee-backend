@@ -429,6 +429,13 @@ const adminValidation = {
     reason: Joi.string().required().max(500),
   }),
 
+  priceChangeList: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(20),
+    status: Joi.string().valid('scheduled', 'applied', 'superseded', 'cancelled'),
+    q: Joi.string().trim().max(100).allow(''),
+  }),
+
   markNotificationsRead: Joi.object({
     ids: Joi.array().items(objectId).max(200),
   }),

@@ -314,6 +314,42 @@ class NotificationService {
     return { recipients: userIds.length, failed };
   }
 
+  // Tells everyone holding this product in their cart that its price will
+  // change, each in their own language and with the price they would pay.
+  // `template` is 'priceChangeScheduled' or 'priceChangeReminder'.
+  async notifyCartOwnersOfScheduledPriceChange(change, template = 'priceChangeScheduled') {
+    const carts = await Cart.find({ 'items.productId': change.productId }).select('userId').lean();
+    if (carts.length === 0) return { recipients: 0, failed: 0 };
+
+    const users = await User.find({ _id: { $in: carts.map((c) => c.userId) }, isActive: true })
+      .select('role')
+      .lean();
+    const effectiveDate = new Intl.DateTimeFormat('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      timeZone: change.timeZone,
+    }).format(new Date(change.effectiveAt));
+
+    const results = await Promise.allSettled(users.map((user) => {
+      const wholesaler = user.role === 'wholesaler';
+      const newPrice = wholesaler ? change.newWholesalePrice : change.newRetailPrice;
+      // Nothing to say to someone whose price is not changing.
+      if (newPrice == null) return Promise.resolve();
+      return this.sendLocalizedToUser(
+        user._id,
+        template,
+        { productName: change.productName, newPrice, effectiveDate },
+        {
+          type: 'price_change_scheduled',
+          productId: String(change.productId),
+          effectiveAt: new Date(change.effectiveAt).toISOString(),
+        }
+      );
+    }));
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    return { recipients: users.length, failed };
+  }
+
   async sendNegotiationUpdate(userId, negotiationId, message) {
     return this.sendLocalizedToUser(
       userId,

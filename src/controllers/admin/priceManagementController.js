@@ -1,7 +1,7 @@
 const XLSX = require('xlsx');
 const { Category, Product, PriceChangeAudit } = require('../../models');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
-const { requestPriceChange } = require('../../services/priceLifecycleService');
+const { requestPriceChange, cancelScheduledPriceChange } = require('../../services/priceLifecycleService');
 const { BUSINESS_TIMEZONE } = require('../../config/businessTimezone');
 const { getCategoryProductSets } = require('../categoryController');
 const { productCategoryPopulate } = require('../../utils/categoryHelpers');
@@ -65,6 +65,36 @@ exports.getPriceChangeHistory = async (req, res, next) => {
       PriceChangeAudit.countDocuments({}),
     ]);
     res.json({ success: true, ...formatPaginationResponse(history, total, page, limit) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Every price change ever made, newest first, for the Price Changes page.
+exports.listPriceChanges = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = paginate(req.query.page, req.query.limit || 20);
+    const query = {};
+    if (req.query.status) query.status = req.query.status;
+    if (req.query.q) {
+      const pattern = new RegExp(String(req.query.q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      query.$or = [{ productName: pattern }, { productSku: pattern }];
+    }
+    const [rows, total, scheduledCount] = await Promise.all([
+      PriceChangeAudit.find(query).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+      PriceChangeAudit.countDocuments(query),
+      PriceChangeAudit.countDocuments({ status: 'scheduled' }),
+    ]);
+    res.json({ success: true, scheduledCount, ...formatPaginationResponse(rows, total, page, limit) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.cancelPriceChange = async (req, res, next) => {
+  try {
+    const audit = await cancelScheduledPriceChange({ auditId: req.params.id, performedBy: req.user._id });
+    res.json({ success: true, message: 'Scheduled price change cancelled', data: audit });
   } catch (error) {
     next(error);
   }

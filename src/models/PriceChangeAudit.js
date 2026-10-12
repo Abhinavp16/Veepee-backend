@@ -35,11 +35,16 @@ const priceChangeAuditSchema = new mongoose.Schema({
   effectiveAt: { type: Date, required: true },
   status: {
     type: String,
-    enum: ['scheduled', 'applied', 'superseded'],
+    enum: ['scheduled', 'applied', 'superseded', 'cancelled'],
     required: true,
   },
   appliedAt: { type: Date, default: null },
   supersededAt: { type: Date, default: null },
+  cancelledAt: { type: Date, default: null },
+  cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // Customer notices for a scheduled change; set once each so cron reruns cannot repeat them.
+  scheduledNoticeSentAt: { type: Date, default: null },
+  reminderSentAt: { type: Date, default: null },
   supersedingAudit: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PriceChangeAudit',
@@ -55,11 +60,18 @@ priceChangeAuditSchema.index(
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
 );
 
-const lifecycleFields = new Set(['status', 'appliedAt', 'supersededAt', 'supersedingAudit', 'updatedAt']);
+const lifecycleFields = new Set([
+  'status', 'appliedAt', 'supersededAt', 'supersedingAudit', 'cancelledAt', 'cancelledBy',
+  'scheduledNoticeSentAt', 'reminderSentAt', 'updatedAt',
+]);
 
 function assertLifecycleOnly(update) {
   const changedFields = Object.keys(update.$set || {});
-  if (Object.keys(update).some((operator) => operator !== '$set' && operator !== '$currentDate')) {
+  if (Object.keys(update).some((operator) => operator !== '$set' && operator !== '$currentDate' && operator !== '$setOnInsert')) {
+    throw new Error('Price change audits only allow lifecycle updates');
+  }
+  // Mongoose adds `createdAt` to updates for timestamp bookkeeping; anything else is a real edit.
+  if (Object.keys(update.$setOnInsert || {}).some((field) => field !== 'createdAt')) {
     throw new Error('Price change audits only allow lifecycle updates');
   }
   if (changedFields.some((field) => !lifecycleFields.has(field))) {

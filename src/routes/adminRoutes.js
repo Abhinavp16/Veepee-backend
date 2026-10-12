@@ -44,6 +44,8 @@ router.patch('/staff/:id', administrator, validate(adminValidation.updateStaff),
 // The static snapshot route must precede /products/:id so it is never parsed as an id.
 router.get('/products/price-snapshot.xlsx', administrator, priceManagementController.exportPriceSnapshot);
 router.put('/products/:id/price-change', administrator, validate(adminValidation.priceChange), priceManagementController.createPriceChange);
+router.get('/price-changes', administrator, validate(adminValidation.priceChangeList, 'query'), priceManagementController.listPriceChanges);
+router.post('/price-changes/:id/cancel', administrator, priceManagementController.cancelPriceChange);
 router.get('/price-change-history', administrator, priceManagementController.getPriceChangeHistory);
 router.get('/price-management/config', administrator, priceManagementController.getPriceManagementConfig);
 router.get('/price-management/categories', administrator, priceManagementController.getCategories);

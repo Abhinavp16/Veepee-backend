@@ -1,4 +1,4 @@
-const { processDuePriceChanges } = require('./priceLifecycleService');
+const { processDuePriceChanges, sendPriceChangeReminders } = require('./priceLifecycleService');
 const { sweepDueLaunches } = require('./productLaunchService');
 
 // Vercel Hobby allows a single daily cron, so every scheduled job runs from
@@ -6,6 +6,7 @@ const { sweepDueLaunches } = require('./productLaunchService');
 const runDailyJobs = async () => {
   const jobs = {
     priceChanges: processDuePriceChanges,
+    priceChangeReminders: sendPriceChangeReminders,
     productLaunches: sweepDueLaunches,
   };
   const results = {};

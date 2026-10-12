@@ -29,6 +29,14 @@ const TEMPLATES = {
     en: { title: 'Price Updated', body: '{productName} has an updated price.' },
     hi: { title: 'कीमत बदली', body: '{productName} की कीमत अपडेट हुई है।' },
   },
+  priceChangeScheduled: {
+    en: { title: 'Price changing soon', body: '{productName} will be ₹{newPrice} from {effectiveDate}.' },
+    hi: { title: 'कीमत जल्द बदलेगी', body: '{productName} की कीमत {effectiveDate} से ₹{newPrice} होगी।' },
+  },
+  priceChangeReminder: {
+    en: { title: 'Price changes tomorrow', body: '{productName} goes to ₹{newPrice} on {effectiveDate}.' },
+    hi: { title: 'कल कीमत बदलेगी', body: '{productName} की कीमत {effectiveDate} को ₹{newPrice} हो जाएगी।' },
+  },
   paymentVerified: {
     en: {
       title: 'Payment Verified!',

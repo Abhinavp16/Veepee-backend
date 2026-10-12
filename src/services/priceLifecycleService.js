@@ -154,6 +154,35 @@ async function notifyCartOwnersOfPriceChange(event) {
   }
 }
 
+function scheduledChangeEvent(audit) {
+  return {
+    productId: audit.product,
+    productName: audit.productName,
+    newRetailPrice: audit.newRetailPrice,
+    newWholesalePrice: audit.newWholesalePrice,
+    effectiveAt: audit.effectiveAt,
+    timeZone: BUSINESS_TIMEZONE,
+  };
+}
+
+// Sends a customer notice for a scheduled change at most once: `field` is
+// claimed atomically first, so overlapping runs cannot both send it.
+async function announceScheduledChange(audit, template, field) {
+  // An MRP-only change does not alter what customers pay.
+  if (audit.newRetailPrice == null && audit.newWholesalePrice == null) return false;
+  const claim = await PriceChangeAudit.updateOne(
+    { _id: audit._id, status: 'scheduled', [field]: null },
+    { $set: { [field]: new Date() } }
+  );
+  if (claim.modifiedCount !== 1) return false;
+  try {
+    await notificationService.notifyCartOwnersOfScheduledPriceChange(scheduledChangeEvent(audit), template);
+  } catch (error) {
+    console.error(`Failed to announce scheduled price change ${audit._id}:`, error);
+  }
+  return true;
+}
+
 async function getIdempotentResult(productId, idempotencyKey, fingerprint) {
   if (!idempotencyKey) return null;
   const audit = await PriceChangeAudit.findOne({ product: productId, idempotencyKey }).lean();
@@ -248,6 +277,9 @@ async function requestPriceChange({ productId, prices, priceChangeMode, effectiv
     if (!result.idempotent && result.audit.status === 'applied') {
       await notifyCartOwnersOfPriceChange(priceChangeEvent(result.product, result.audit));
     }
+    if (!result.idempotent && result.audit.status === 'scheduled') {
+      await announceScheduledChange(result.audit, 'priceChangeScheduled', 'scheduledNoticeSentAt');
+    }
     return result;
   } catch (error) {
     if (error?.code === 11000 && normalizedKey) {
@@ -316,6 +348,59 @@ async function processDuePriceChanges() {
   return { inspected: dueProducts.length, applied, failed };
 }
 
+/**
+ * Cancels a change that has not taken effect yet. The live price is never
+ * touched; the product just stops showing a pending change.
+ */
+async function cancelScheduledPriceChange({ auditId, performedBy }) {
+  const session = await mongoose.startSession();
+  try {
+    let audit;
+    await session.withTransaction(async () => {
+      audit = await PriceChangeAudit.findOne({ _id: auditId, status: 'scheduled' }).session(session);
+      if (!audit) {
+        throw new ConflictError('Only a scheduled price change can be cancelled', 'PRICE_CHANGE_NOT_CANCELLABLE');
+      }
+      const product = await Product.findById(audit.product).session(session);
+      if (product && String(product.activePendingPriceChangeAudit) === String(audit._id)) {
+        await Product.updateOne(
+          { _id: product._id },
+          { $set: clearPendingPriceChange(), $unset: { pendingPriceChange: 1 } },
+          { session, strict: false }
+        );
+      }
+      await PriceChangeAudit.updateOne(
+        { _id: audit._id, status: 'scheduled' },
+        { $set: { status: 'cancelled', cancelledAt: new Date(), cancelledBy: performedBy } },
+        { session }
+      );
+    });
+    return PriceChangeAudit.findById(auditId).lean();
+  } finally {
+    await session.endSession();
+  }
+}
+
+/**
+ * The "price changes tomorrow" reminder, for changes scheduled more than a
+ * day ahead (24-hour changes were already announced when they were made).
+ */
+async function sendPriceChangeReminders(now = new Date()) {
+  const horizon = new Date(now.getTime() + 24 * HOUR_MS);
+  const candidates = await PriceChangeAudit.find({
+    status: 'scheduled',
+    reminderSentAt: null,
+    effectiveAt: { $gt: now, $lte: horizon },
+  }).lean();
+
+  let reminded = 0;
+  for (const audit of candidates) {
+    if (new Date(audit.effectiveAt) - new Date(audit.scheduledAt) <= 24 * HOUR_MS) continue;
+    if (await announceScheduledChange(audit, 'priceChangeReminder', 'reminderSentAt')) reminded += 1;
+  }
+  return { reminded };
+}
+
 module.exports = {
   // Pure helpers exposed for unit tests only.
   __test: { submittedPrices, assertSubmittedPricesChange, assertMrpNotBelowRetail, requestFingerprint, clearPendingPriceChange },
@@ -323,4 +408,6 @@ module.exports = {
   calculateEffectiveAt,
   requestPriceChange,
   processDuePriceChanges,
+  cancelScheduledPriceChange,
+  sendPriceChangeReminders,
 };

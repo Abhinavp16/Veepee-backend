@@ -22,7 +22,24 @@ const {
 // Fields every product response needs beyond the raw document: the price the
 // shopper pays, how many they may order, and any coming-soon state.
 const SHOPPER_FIELDS =
-  'packSize priceUnit minCustomerQuantity comingSoon expectedLaunchDate hidePriceWhileComingSoon';
+  'packSize priceUnit minCustomerQuantity comingSoon expectedLaunchDate hidePriceWhileComingSoon pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
+
+// A scheduled price change the shopper can be warned about: the price they
+// would pay, when it starts. Nothing when there is none, when it is not a
+// change for them, when a brand/category discount sets their price anyway, or
+// when it is already due (the daily job applies it).
+const pendingPriceNotice = (product, role, pricing, now) => {
+  if (!product.priceChangeEffectiveAt || new Date(product.priceChangeEffectiveAt) <= now) return null;
+  if ((pricing.discountPercent || 0) > 0) return null;
+  const newPrice = role === 'wholesaler' ? product.pendingWholesalePrice : product.pendingRetailPrice;
+  if (newPrice == null || pricing.price == null || Number(newPrice) === Number(pricing.price)) return null;
+  return {
+    currentPrice: pricing.price,
+    newPrice: Number(newPrice),
+    effectiveAt: product.priceChangeEffectiveAt,
+    scheduledAt: product.priceChangeScheduledAt || null,
+  };
+};
 
 const shopperBlock = (product, role, ctx, now) => {
   const pricing = pricingForUser(product, role, ctx);
@@ -44,6 +61,7 @@ const shopperBlock = (product, role, ctx, now) => {
     }
     block.discountPercent = 0;
   }
+  block.pendingPriceChange = block.priceHidden ? null : pendingPriceNotice(product, role, block, now);
   return block;
 };
 
@@ -282,7 +300,6 @@ exports.getProductBySlug = async (req, res, next) => {
         'priceChangeScheduledAt',
         'priceChangeEffectiveAt',
         'activePendingPriceChangeAudit',
-        'pendingPriceChange',
       ]) {
         delete responseData[field];
       }

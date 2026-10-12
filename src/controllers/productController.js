@@ -234,6 +234,21 @@ exports.getProductBySlug = async (req, res, next) => {
       delete responseData.wholesalePrice;
     }
 
+    // Scheduled price changes are internal until they go live; never expose them publicly.
+    if (userRole !== 'admin') {
+      for (const field of [
+        'pendingRetailPrice',
+        'pendingWholesalePrice',
+        'pendingMrp',
+        'priceChangeScheduledAt',
+        'priceChangeEffectiveAt',
+        'activePendingPriceChangeAudit',
+        'pendingPriceChange',
+      ]) {
+        delete responseData[field];
+      }
+    }
+
     res.json({
       success: true,
       data: responseData,

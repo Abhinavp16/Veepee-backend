@@ -84,6 +84,11 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // Set when an admin issues a temporary password; cleared once the person
+  // chooses their own.
+  mustChangePassword: { type: Boolean, default: false },
+  passwordChangedAt: { type: Date, default: null },
+
   // Proof of what the person agreed to at signup.
   termsAcceptedAt: { type: Date, default: null },
   termsAcceptedVersion: { type: String, default: null },

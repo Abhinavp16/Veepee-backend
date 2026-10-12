@@ -3,35 +3,46 @@ const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const { User, RefreshToken, DeviceToken } = require('../models');
 const { getStorage } = require('../config/firebase');
-const { UnauthorizedError, ConflictError, BadRequestError } = require('../utils/errors');
+const { UnauthorizedError, ConflictError, BadRequestError, ForbiddenError } = require('../utils/errors');
 const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 const { sanitizeUser } = require('../utils/helpers');
 const { requireAcceptance, buildAcceptanceFields } = require('../config/legalAcceptance');
 
-const generateTokens = async (userId, deviceInfo) => {
+const { ACCESS_SECONDS, REFRESH_SECONDS, STAFF_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
+
+// `sessionEndsAt` (a Date) hard-limits the session, as it does for staff.
+const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {}) => {
+  const sx = sessionEndsAt ? Math.floor(sessionEndsAt.getTime() / 1000) : null;
+  const accessExp = tokenExpiry(ACCESS_SECONDS(), sx);
+  const refreshExp = tokenExpiry(REFRESH_SECONDS(), sx);
+
   const accessToken = jwt.sign(
-    { userId },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m' }
+    { userId, ...(sx && { sx }), exp: accessExp },
+    process.env.JWT_SECRET
   );
 
   const refreshToken = jwt.sign(
-    { userId, type: 'refresh' },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d' }
+    { userId, type: 'refresh', jti: uuidv4(), ...(sx && { sx }), exp: refreshExp },
+    process.env.JWT_SECRET
   );
-
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7);
 
   await RefreshToken.create({
     userId,
     token: refreshToken,
     deviceInfo,
-    expiresAt,
+    expiresAt: new Date(refreshExp * 1000),
+    sessionExpiresAt: sessionEndsAt,
   });
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, ...(sessionEndsAt && { sessionExpiresAt: sessionEndsAt.toISOString() }) };
+};
+
+// Staff sign in only through the staff login, so their sessions are always
+// time-limited; the shared logins turn them away.
+const rejectStaff = (user) => {
+  if (user.role === USER_ROLES.STAFF) {
+    throw new ForbiddenError('Staff accounts sign in from the staff area', 'STAFF_LOGIN_REQUIRED');
+  }
 };
 
 exports.register = async (req, res, next) => {
@@ -130,6 +141,7 @@ exports.login = async (req, res, next) => {
     if (!user.isActive) {
       throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
     }
+    rejectStaff(user);
 
     user.lastLoginAt = new Date();
     await user.save();
@@ -142,6 +154,72 @@ exports.login = async (req, res, next) => {
         user: sanitizeUser(user),
         ...tokens,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.staffLogin = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email, role: USER_ROLES.STAFF }).select('+passwordHash');
+    // Same answer for "no such staff" and "wrong password".
+    if (!user || !(await user.comparePassword(password))) {
+      throw new UnauthorizedError('Invalid credentials', 'AUTH_INVALID_CREDENTIALS');
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
+    }
+
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const sessionEndsAt = new Date(Date.now() + STAFF_SESSION_SECONDS * 1000);
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt });
+
+    res.json({
+      success: true,
+      data: {
+        user: sanitizeUser(user),
+        ...tokens,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const user = await User.findById(req.user._id).select('+passwordHash');
+
+    if (!(await user.comparePassword(currentPassword))) {
+      throw new UnauthorizedError('Current password is incorrect', 'AUTH_INVALID_CREDENTIALS');
+    }
+    if (await user.comparePassword(newPassword)) {
+      throw new BadRequestError('Choose a password you have not used just now', 'PASSWORD_UNCHANGED');
+    }
+
+    user.passwordHash = newPassword;
+    user.mustChangePassword = false;
+    user.passwordChangedAt = new Date();
+    await user.save();
+
+    // Every other sign-in is ended; this one continues with fresh tokens and
+    // keeps its original session end.
+    await RefreshToken.updateMany({ userId: user._id, isRevoked: false }, { isRevoked: true });
+    const sx = req.auth?.sx;
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], {
+      sessionEndsAt: sx ? new Date(sx * 1000) : null,
+    });
+
+    res.json({
+      success: true,
+      message: 'Password changed',
+      data: { user: sanitizeUser(user), ...tokens },
     });
   } catch (error) {
     next(error);
@@ -165,6 +243,8 @@ exports.loginWithPhone = async (req, res, next) => {
     if (!user.isActive) {
       throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
     }
+
+    rejectStaff(user);
 
     // Validate role if expectedRole is provided
     if (expectedRole) {
@@ -395,10 +475,21 @@ exports.refreshToken = async (req, res, next) => {
       throw new UnauthorizedError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
     }
 
+    // Staff sessions end at a fixed time and cannot be renewed past it. A
+    // staff token with no recorded end predates that rule, so it ends now.
+    const sessionEndsAt = storedToken.sessionExpiresAt;
+    const staffUser = await User.findById(user._id).select('role');
+    if (staffUser?.role === USER_ROLES.STAFF && !sessionEndsAt) {
+      throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
+    }
+    if (sessionEndsAt && sessionEndsAt <= new Date()) {
+      throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
+    }
+
     storedToken.isRevoked = true;
     await storedToken.save();
 
-    const tokens = await generateTokens(user._id, req.headers['user-agent']);
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt });
 
     res.json({
       success: true,

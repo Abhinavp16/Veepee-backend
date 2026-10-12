@@ -55,7 +55,7 @@ exports.getAllCompanies = async (req, res, next) => {
     }
 
     const [companies, total] = await Promise.all([
-      Company.find(query).sort({ name: 1 }).skip(skip).limit(limit).lean(),
+      Company.find(query).sort({ displayOrder: 1, name: 1 }).skip(skip).limit(limit).lean(),
       Company.countDocuments(query),
     ]);
 
@@ -97,11 +97,14 @@ exports.createCompany = async (req, res, next) => {
       throw new ConflictError('Company with this name already exists', 'COMPANY_EXISTS');
     }
 
+    // New brands go to the end of the ordered list.
+    const last = await Company.findOne().sort({ displayOrder: -1 }).select('displayOrder').lean();
     const company = await Company.create({
       name,
       description,
       website,
       logo,
+      displayOrder: (last?.displayOrder || 0) + 1,
     });
 
     res.status(201).json({
@@ -298,6 +301,30 @@ exports.unlinkCompanyCategory = async (req, res, next) => {
     company.categoryIds = (company.categoryIds || []).filter((id) => String(id) !== String(category._id));
     await company.save();
     res.json({ success: true, message: 'Category unlinked from company successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Sets the position of each brand to its place in `ids` (1, 2, 3...).
+exports.reorderCompanies = async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestError('Each brand can appear only once', 'DUPLICATE_IDS');
+    }
+    const count = await Company.countDocuments({ _id: { $in: ids } });
+    if (count !== ids.length) {
+      throw new NotFoundError('One or more brands were not found', 'COMPANY_NOT_FOUND');
+    }
+
+    await Company.bulkWrite(
+      ids.map((id, index) => ({
+        updateOne: { filter: { _id: id }, update: { $set: { displayOrder: index + 1 } } },
+      }))
+    );
+
+    res.json({ success: true, message: 'Brand order saved' });
   } catch (error) {
     next(error);
   }

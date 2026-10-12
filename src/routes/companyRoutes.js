@@ -15,6 +15,9 @@ const companyValidation = {
       publicId: Joi.string().allow('', null),
     }).allow(null),
   }),
+  reorder: Joi.object({
+    ids: Joi.array().items(Joi.string().pattern(/^[0-9a-fA-F]{24}$/)).min(1).max(500).required(),
+  }),
   update: Joi.object({
     name: Joi.string().max(100),
     description: Joi.string().max(500).allow('', null),
@@ -29,6 +32,7 @@ const companyValidation = {
 
 // Public routes
 router.get('/', companyController.getAllCompanies);
+router.patch('/reorder', protect, authorize('admin', 'staff'), validate(companyValidation.reorder), companyController.reorderCompanies);
 router.get('/:companyId/categories', protect, authorize('admin', 'staff'), companyController.getCompanyCategories);
 router.post('/:companyId/categories', protect, authorize('admin', 'staff'), companyController.createCompanyCategory);
 router.put('/:companyId/categories/:categoryId', protect, authorize('admin', 'staff'), companyController.linkCompanyCategory);

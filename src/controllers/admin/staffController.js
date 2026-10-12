@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { User, RefreshToken } = require('../../models');
 const { USER_ROLES, AUTH_PROVIDERS } = require('../../utils/constants');
 const { ConflictError, NotFoundError } = require('../../utils/errors');
@@ -24,6 +25,8 @@ exports.createStaff = async (req, res, next) => {
       authProvider: AUTH_PROVIDERS.EMAIL,
       role: USER_ROLES.STAFF,
       isActive: true,
+      // The admin chose this password, so the person picks their own at first sign-in.
+      mustChangePassword: true,
     });
 
     res.status(201).json({
@@ -88,7 +91,10 @@ exports.updateStaff = async (req, res, next) => {
     if (email !== undefined) staff.email = email;
     if (phone !== undefined) staff.phone = phone || undefined;
     const passwordChanged = password !== undefined;
-    if (passwordChanged) staff.passwordHash = password;
+    if (passwordChanged) {
+      staff.passwordHash = password;
+      staff.mustChangePassword = true;
+    }
 
     const deactivated = isActive === false && staff.isActive;
     if (isActive !== undefined) staff.isActive = isActive;
@@ -111,6 +117,32 @@ exports.updateStaff = async (req, res, next) => {
       success: true,
       message,
       data: sanitizeUser(staff),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Issues a new temporary password, shown once to the admin to pass on. The
+// staff member must replace it at their next sign-in, and every current
+// session ends now.
+exports.resetStaffPassword = async (req, res, next) => {
+  try {
+    const staff = await User.findOne({ _id: req.params.id, ...staffQuery }).select('+passwordHash');
+    if (!staff) {
+      throw new NotFoundError('Staff account not found', 'STAFF_NOT_FOUND');
+    }
+
+    const temporaryPassword = crypto.randomBytes(9).toString('base64url');
+    staff.passwordHash = temporaryPassword;
+    staff.mustChangePassword = true;
+    await staff.save();
+    await RefreshToken.updateMany({ userId: staff._id, isRevoked: false }, { isRevoked: true });
+
+    res.json({
+      success: true,
+      message: 'Temporary password issued and active sessions revoked',
+      data: { temporaryPassword },
     });
   } catch (error) {
     next(error);

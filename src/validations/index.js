@@ -58,6 +58,16 @@ const authValidation = {
     password: Joi.string().required(),
   }),
 
+  staffLogin: Joi.object({
+    email: Joi.string().email().lowercase().required(),
+    password: Joi.string().required(),
+  }),
+
+  changePassword: Joi.object({
+    currentPassword: Joi.string().required(),
+    newPassword: Joi.string().min(8).max(128).required(),
+  }),
+
   loginPhone: Joi.object({
     phone: Joi.string().required().min(10).max(15),
     password: Joi.string().required(),

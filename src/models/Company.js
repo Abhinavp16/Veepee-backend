@@ -35,6 +35,11 @@ const companySchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Position in brand lists (smaller first); ties fall back to name.
+  displayOrder: {
+    type: Number,
+    default: 0,
+  },
   productCount: {
     type: Number,
     default: 0,

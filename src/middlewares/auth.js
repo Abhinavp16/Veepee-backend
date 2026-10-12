@@ -2,6 +2,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { UnauthorizedError, ForbiddenError } = require('../utils/errors');
 
+const PASSWORD_CHANGE_ALLOWED = ['/auth/change-password', '/auth/me', '/auth/logout'];
+
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -16,6 +18,15 @@ const protect = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    // A refresh token is not an access token.
+    if (decoded.type === 'refresh') {
+      throw new UnauthorizedError('Invalid token', 'INVALID_TOKEN');
+    }
+    // Sessions with a hard end (staff) stop working at that moment.
+    if (decoded.sx && Date.now() / 1000 >= decoded.sx) {
+      throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
+    }
+
     const user = await User.findById(decoded.userId).select('-passwordHash');
 
     if (!user) {
@@ -26,7 +37,13 @@ const protect = async (req, res, next) => {
       throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
     }
 
+    // After an admin issues a temporary password, only changing it is allowed.
+    if (user.mustChangePassword && !PASSWORD_CHANGE_ALLOWED.some((path) => req.originalUrl.split('?')[0].endsWith(path))) {
+      throw new ForbiddenError('Please change your temporary password first', 'PASSWORD_CHANGE_REQUIRED');
+    }
+
     req.user = user;
+    req.auth = decoded;
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

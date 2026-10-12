@@ -36,6 +36,7 @@ router.use(protect);
 // enumerate, create, change, deactivate, or otherwise manage staff accounts.
 router.post('/staff', administrator, validate(adminValidation.createStaff), staffController.createStaff);
 router.get('/staff', administrator, validate(adminValidation.staffList, 'query'), staffController.getStaff);
+router.post('/staff/:id/reset-password', administrator, staffController.resetStaffPassword);
 router.patch('/staff/:id', administrator, validate(adminValidation.updateStaff), staffController.updateStaff);
 
 // Price management changes commercial terms and remains Administrator-only.

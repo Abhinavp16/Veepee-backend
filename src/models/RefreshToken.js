@@ -16,6 +16,11 @@ const refreshTokenSchema = new mongoose.Schema({
     type: Date,
     required: true,
   },
+  // Set for staff: the sign-in's hard end. Refreshing never extends past it.
+  sessionExpiresAt: {
+    type: Date,
+    default: null,
+  },
   isRevoked: {
     type: Boolean,
     default: false,

@@ -12,6 +12,7 @@ router.post('/register/wholesaler', validate(authValidation.registerWholesaler),
 router.post('/register-phone', validate(authValidation.registerPhone), authController.registerWithPhone);
 router.post('/register-phone/wholesaler', validate(authValidation.registerPhoneWholesaler), authController.registerWholesalerWithPhone);
 router.post('/login', validate(authValidation.login), authController.login);
+router.post('/staff-login', validate(authValidation.staffLogin), authController.staffLogin);
 router.post('/login-phone', validate(authValidation.loginPhone), authController.loginWithPhone);
 router.post('/google', validate(authValidation.googleAuth), authController.googleAuth);
 router.post('/send-otp', validate(authValidation.sendOtp), authController.sendOtp);
@@ -19,6 +20,7 @@ router.post('/verify-phone', validate(authValidation.verifyPhone), authControlle
 router.post('/refresh-token', validate(authValidation.refreshToken), authController.refreshToken);
 router.post('/logout', protect, validate(authValidation.logout), authController.logout);
 router.put('/preferences', protect, validate(authValidation.updatePreferences), authController.updatePreferences);
+router.post('/change-password', protect, validate(authValidation.changePassword), authController.changePassword);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
 router.post('/profile/avatar', protect, uploadAvatar.single('avatar'), authController.uploadProfileAvatar);

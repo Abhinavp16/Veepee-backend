@@ -548,6 +548,46 @@ exports.updatePreferences = async (req, res, next) => {
   }
 };
 
+const addressesPayload = (user) => ({
+  addresses: (user.savedAddresses || []).map((address) => ({
+    id: address.id,
+    slot: address.slot,
+    fullName: address.fullName,
+    phone: address.phone,
+    addressLine1: address.addressLine1,
+    city: address.city,
+    state: address.state,
+    pincode: address.pincode,
+  })),
+  selectedAddressId: user.selectedAddressId || null,
+});
+
+exports.getAddresses = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('+savedAddresses +selectedAddressId');
+    res.json({ success: true, data: addressesPayload(user) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Replaces the account's saved addresses with the app's list (at most one
+// primary and one secondary).
+exports.saveAddresses = async (req, res, next) => {
+  try {
+    const { addresses, selectedAddressId } = req.body;
+    const user = await User.findById(req.user._id).select('+savedAddresses +selectedAddressId');
+    user.savedAddresses = addresses;
+    user.selectedAddressId = addresses.some((address) => address.id === selectedAddressId)
+      ? selectedAddressId
+      : addresses[0]?.id || null;
+    await user.save();
+    res.json({ success: true, message: 'Addresses saved', data: addressesPayload(user) });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getMe = async (req, res, next) => {
   try {
     res.json({

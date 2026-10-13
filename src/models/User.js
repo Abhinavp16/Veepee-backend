@@ -28,6 +28,29 @@ const userSchema = new mongoose.Schema({
     default: null,
     trim: true,
   },
+  // Delivery addresses saved in the app (primary and secondary). Kept on the
+  // account so they come back after signing in on any phone. Not sent with
+  // the profile; read them from GET /auth/addresses.
+  savedAddresses: {
+    type: [
+      new mongoose.Schema(
+        {
+          id: { type: String, required: true },
+          slot: { type: String, enum: ['primary', 'secondary'], required: true },
+          fullName: { type: String, required: true, trim: true },
+          phone: { type: String, required: true, trim: true },
+          addressLine1: { type: String, required: true, trim: true },
+          city: { type: String, required: true, trim: true },
+          state: { type: String, required: true, trim: true },
+          pincode: { type: String, required: true, trim: true },
+        },
+        { _id: false }
+      ),
+    ],
+    default: [],
+    select: false,
+  },
+  selectedAddressId: { type: String, default: null, select: false },
   avatar: {
     type: String,
     default: null,

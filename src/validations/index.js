@@ -95,6 +95,29 @@ const authValidation = {
     privacyPolicyVersion: Joi.string().max(32),
   }),
 
+  saveAddresses: Joi.object({
+    addresses: Joi.array()
+      .items(
+        Joi.object({
+          id: Joi.string().trim().min(1).max(64).required(),
+          slot: Joi.string().valid('primary', 'secondary').required(),
+          fullName: Joi.string().trim().min(1).max(100).required(),
+          phone: Joi.string().trim().pattern(/^\d{10}$/).required()
+            .messages({ 'string.pattern.base': 'Phone must be 10 digits' }),
+          addressLine1: Joi.string().trim().min(1).max(300).required(),
+          city: Joi.string().trim().min(1).max(100).required(),
+          state: Joi.string().trim().min(1).max(100).required(),
+          pincode: Joi.string().trim().pattern(/^[1-9]\d{5}$/).required()
+            .messages({ 'string.pattern.base': 'Pincode must be 6 digits' }),
+        })
+      )
+      .max(2)
+      .unique('slot')
+      .unique('id')
+      .required(),
+    selectedAddressId: Joi.string().trim().max(64).allow(null, ''),
+  }),
+
   updatePreferences: Joi.object({
     language: Joi.string().valid('en', 'hi').required(),
   }),

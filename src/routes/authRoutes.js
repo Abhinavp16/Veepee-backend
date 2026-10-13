@@ -23,6 +23,8 @@ router.put('/preferences', protect, validate(authValidation.updatePreferences), 
 router.post('/change-password', protect, validate(authValidation.changePassword), authController.changePassword);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
+router.get('/addresses', protect, authController.getAddresses);
+router.put('/addresses', protect, validate(authValidation.saveAddresses), authController.saveAddresses);
 router.post('/profile/avatar', protect, uploadAvatar.single('avatar'), authController.uploadProfileAvatar);
 router.post('/fcm-token', protect, buyerOrWholesaler, validate(authValidation.fcmToken), authController.registerFcmToken);
 router.post('/convert-to-wholesaler', protect, buyerOrWholesaler, uploadProductImages.array('proofImages', 3), validate(authValidation.convertWholesaler), authController.convertToWholesaler);

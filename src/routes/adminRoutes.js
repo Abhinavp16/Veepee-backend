@@ -89,6 +89,9 @@ router.get('/orders', operationsStaff, adminOrderController.getOrders);
 router.get('/orders/:id', operationsStaff, adminOrderController.getOrderById);
 router.put('/orders/:id/status', operationsStaff, validate(adminValidation.updateOrderStatus), adminOrderController.updateOrderStatus);
 router.put('/orders/:id/ship', operationsStaff, validate(adminValidation.shipOrder), adminOrderController.shipOrder);
+// New orders: add the delivery charge and confirm, or reject with a reason.
+router.put('/orders/:id/confirm', operationsStaff, validate(adminValidation.confirmOrder), adminOrderController.confirmOrder);
+router.put('/orders/:id/reject', operationsStaff, validate(adminValidation.rejectOrder), adminOrderController.rejectOrder);
 router.get('/payments', administrator, adminPaymentController.getPayments);
 router.put('/payments/:id/verify', administrator, adminPaymentController.verifyPayment);
 router.put('/payments/:id/reject', administrator, validate(adminValidation.rejectPayment), adminPaymentController.rejectPayment);

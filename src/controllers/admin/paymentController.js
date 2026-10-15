@@ -1,3 +1,4 @@
+const { assertOrderConfirmed } = require('../../services/orderConfirmationService');
 const { Payment, Order, Product, StockLog } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
@@ -43,6 +44,10 @@ exports.verifyPayment = async (req, res, next) => {
     if (payment.status !== PAYMENT_STATUS.PENDING) {
       throw new BadRequestError('Payment already processed', 'PAYMENT_ALREADY_PROCESSED');
     }
+
+    // Nothing is paid for before the shop confirms the order and its delivery.
+    const orderToCheck = await Order.findById(payment.orderId).select('confirmationStatus');
+    if (orderToCheck) assertOrderConfirmed(orderToCheck);
 
     payment.status = PAYMENT_STATUS.VERIFIED;
     payment.verifiedBy = req.user._id;

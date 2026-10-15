@@ -27,6 +27,13 @@ module.exports = {
     CANCELLED: 'cancelled',
   },
 
+  // New orders wait for the shop to confirm them and add the delivery charge.
+  ORDER_CONFIRMATION: {
+    PENDING: 'pending',
+    CONFIRMED: 'confirmed',
+    REJECTED: 'rejected',
+  },
+
   ORDER_TYPES: {
     RETAIL: 'retail',
     WHOLESALE: 'wholesale',

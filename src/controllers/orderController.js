@@ -1,7 +1,7 @@
 const { Order, Cart, Product, Negotiation, Payment, Settings, AffiliateCode, Offer } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
-const { ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
+const { ORDER_CONFIRMATION, ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
 
 const { loadDiscountContext, priceFor } = require('../services/productPricingService');
 const { assertPurchasable } = require('../utils/productAvailability');
@@ -228,6 +228,9 @@ const getCurrentCartPricing = async (userId, userRole) => {
   return { subtotal, itemCount };
 };
 
+const AWAITING_CONFIRMATION_MESSAGE =
+  'Order placed. We will confirm it and add the delivery charge, then you can pay.';
+
 exports.previewCouponForCart = async (req, res, next) => {
   try {
     const { couponCode, subtotal: requestedSubtotal } = req.body;
@@ -259,7 +262,8 @@ exports.previewCouponForCart = async (req, res, next) => {
       userRole: req.user.role,
     });
 
-    const deliveryFee = subtotal > 0 ? 50 : 0;
+    // Delivery is added by the shop when it confirms the order.
+    const deliveryFee = 0;
     const totalBeforeDiscount = subtotal + deliveryFee;
     const payableTotal = Math.max(totalBeforeDiscount - discount, 0);
 
@@ -322,8 +326,13 @@ exports.getMyOrders = async (req, res, next) => {
           totalPrice: item.totalPrice,
           image: item.productSnapshot.image,
         })),
+        subtotal: o.subtotal,
+        deliveryFee: o.deliveryFee,
+        discount: o.discount,
         total: o.total,
         status: o.status,
+        confirmationStatus: o.confirmationStatus || null,
+        confirmationNote: o.confirmationNote || null,
         trackingNumber: o.trackingNumber,
         createdAt: o.createdAt,
         payment: payment ? {
@@ -448,7 +457,8 @@ exports.createOrderFromCart = async (req, res, next) => {
       subtotal,
       userRole: req.user.role,
     });
-    const deliveryFee = subtotal > 0 ? 50 : 0;
+    // Delivery is added by the shop when it confirms the order.
+    const deliveryFee = 0;
     const total = Math.max(subtotal + deliveryFee - discount, 0);
 
     const order = await Order.create({
@@ -470,9 +480,10 @@ exports.createOrderFromCart = async (req, res, next) => {
       total,
       shippingAddress,
       customerNote,
+      confirmationStatus: ORDER_CONFIRMATION.PENDING,
       statusHistory: [{
         status: ORDER_STATUS.PENDING_PAYMENT,
-        note: 'Order created',
+        note: 'Order placed; awaiting confirmation and delivery charge',
       }],
       affiliateCode: resolvedAffiliateCode,
       offerCode,
@@ -525,7 +536,7 @@ exports.createOrderFromCart = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Order created. Please complete payment.',
+      message: AWAITING_CONFIRMATION_MESSAGE,
       data: {
         orderId: order._id,
         orderNumber: order.orderNumber,
@@ -534,6 +545,8 @@ exports.createOrderFromCart = async (req, res, next) => {
         discount: order.discount,
         total: order.total,
         status: order.status,
+        confirmationStatus: order.confirmationStatus,
+        nextAction: 'await_confirmation',
         offerCode: order.offerCode,
         affiliateCode: order.affiliateCode,
         discountSource: order.discountSource,
@@ -610,9 +623,10 @@ const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, custo
     total,
     shippingAddress,
     customerNote,
+    confirmationStatus: ORDER_CONFIRMATION.PENDING,
     statusHistory: [{
       status: ORDER_STATUS.PENDING_PAYMENT,
-      note: isGroup ? 'Order created from a requirement' : 'Order created from negotiation',
+      note: `${isGroup ? 'Order created from a requirement' : 'Order created from negotiation'}; awaiting confirmation and delivery charge`,
     }],
     affiliateCode: resolvedAffiliateCode,
     offerCode,
@@ -654,13 +668,17 @@ const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, custo
 
 const negotiatedOrderResponse = ({ order, settings }) => ({
   success: true,
-  message: 'Order created. Please complete payment.',
+  message: AWAITING_CONFIRMATION_MESSAGE,
   data: {
     orderId: order._id,
     orderNumber: order.orderNumber,
+    subtotal: order.subtotal,
+    deliveryFee: order.deliveryFee,
     discount: order.discount,
     total: order.total,
     status: order.status,
+    confirmationStatus: order.confirmationStatus,
+    nextAction: 'await_confirmation',
     offerCode: order.offerCode,
     affiliateCode: order.affiliateCode,
     discountSource: order.discountSource,

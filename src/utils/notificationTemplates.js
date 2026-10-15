@@ -5,6 +5,18 @@ const TEMPLATES = {
     en: { title: 'Order Confirmed!', body: 'Your order has been confirmed and is being processed.' },
     hi: { title: 'ऑर्डर कन्फर्म हो गया!', body: 'आपका ऑर्डर कन्फर्म हो गया है और तैयार किया जा रहा है।' },
   },
+  orderConfirmedPay: {
+    en: { title: 'Order confirmed · please pay', body: 'Order {orderNumber} is confirmed. Delivery ₹{deliveryFee} added. Pay ₹{total} to complete it.' },
+    hi: { title: 'ऑर्डर कन्फर्म · कृपया भुगतान करें', body: 'ऑर्डर {orderNumber} कन्फर्म हो गया। डिलीवरी ₹{deliveryFee} जोड़ी गई। पूरा करने के लिए ₹{total} का भुगतान करें।' },
+  },
+  orderConfirmedPayFreeDelivery: {
+    en: { title: 'Order confirmed · please pay', body: 'Order {orderNumber} is confirmed with free delivery. Pay ₹{total} to complete it.' },
+    hi: { title: 'ऑर्डर कन्फर्म · कृपया भुगतान करें', body: 'ऑर्डर {orderNumber} मुफ़्त डिलीवरी के साथ कन्फर्म हो गया। पूरा करने के लिए ₹{total} का भुगतान करें।' },
+  },
+  orderRejected: {
+    en: { title: 'Order not confirmed', body: 'Order {orderNumber} could not be confirmed: {reason}' },
+    hi: { title: 'ऑर्डर कन्फर्म नहीं हुआ', body: 'ऑर्डर {orderNumber} कन्फर्म नहीं हो सका: {reason}' },
+  },
   orderShipped: {
     en: { title: 'Order Shipped!', body: 'Your order is on its way!' },
     hi: { title: 'ऑर्डर भेज दिया गया!', body: 'आपका ऑर्डर रास्ते में है!' },

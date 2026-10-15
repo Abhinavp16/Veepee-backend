@@ -1,3 +1,4 @@
+const { assertOrderConfirmed } = require('../services/orderConfirmationService');
 const { notifyTeam } = require('../services/adminNotificationService');
 const { Payment, Order, Settings } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
@@ -37,6 +38,9 @@ exports.uploadScreenshot = async (req, res, next) => {
     if (order.status !== ORDER_STATUS.PENDING_PAYMENT) {
       throw new BadRequestError('Payment already processed', 'PAYMENT_ALREADY_PROCESSED');
     }
+
+    // The delivery charge is added on confirmation, so pay only after that.
+    assertOrderConfirmed(order);
 
     const payment = await Payment.findOne({ orderId });
     if (!payment) {

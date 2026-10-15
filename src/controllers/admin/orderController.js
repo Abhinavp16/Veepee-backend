@@ -3,6 +3,7 @@ const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { ORDER_STATUS } = require('../../utils/constants');
 const notificationService = require('../../services/notificationService');
+const orderConfirmationService = require('../../services/orderConfirmationService');
 
 exports.getOrders = async (req, res, next) => {
   try {
@@ -11,6 +12,9 @@ exports.getOrders = async (req, res, next) => {
 
     const query = {};
     if (status) query.status = status;
+    if (['pending', 'confirmed', 'rejected'].includes(req.query.confirmation)) {
+      query.confirmationStatus = req.query.confirmation;
+    }
     if (orderType) query.orderType = orderType;
     if (dateFrom || dateTo) {
       query.createdAt = {};
@@ -182,6 +186,48 @@ exports.updateOrderStatus = async (req, res, next) => {
         status: order.status,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const confirmationResponse = (order, message) => ({
+  success: true,
+  message,
+  data: {
+    orderId: order._id,
+    orderNumber: order.orderNumber,
+    status: order.status,
+    confirmationStatus: order.confirmationStatus,
+    subtotal: order.subtotal,
+    deliveryFee: order.deliveryFee,
+    discount: order.discount,
+    total: order.total,
+  },
+});
+
+// Adds the delivery charge and lets the customer pay.
+exports.confirmOrder = async (req, res, next) => {
+  try {
+    const order = await orderConfirmationService.confirmOrder({
+      orderId: req.params.id,
+      deliveryCharge: req.body.deliveryCharge,
+      actorId: req.user._id,
+    });
+    res.json(confirmationResponse(order, 'Order confirmed. The customer has been asked to pay.'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.rejectOrder = async (req, res, next) => {
+  try {
+    const order = await orderConfirmationService.rejectOrder({
+      orderId: req.params.id,
+      reason: req.body.reason,
+      actorId: req.user._id,
+    });
+    res.json(confirmationResponse(order, 'Order rejected. The customer has been told why.'));
   } catch (error) {
     next(error);
   }

@@ -130,6 +130,18 @@ const orderSchema = new mongoose.Schema({
     default: ORDER_STATUS.PENDING_PAYMENT,
   },
 
+  // The shop confirms each new order and adds the delivery charge before the
+  // customer pays. Null for orders placed before this step existed.
+  confirmationStatus: {
+    type: String,
+    enum: ['pending', 'confirmed', 'rejected', null],
+    default: null,
+  },
+  confirmedAt: { type: Date, default: null },
+  confirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // Why the shop rejected the order.
+  confirmationNote: { type: String, default: null },
+
   statusHistory: [statusHistorySchema],
 
   trackingNumber: {

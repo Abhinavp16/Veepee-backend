@@ -480,6 +480,14 @@ const adminValidation = {
     note: Joi.string().max(500).allow('', null),
   }),
 
+  confirmOrder: Joi.object({
+    deliveryCharge: Joi.number().min(0).max(10000000).required(),
+  }),
+
+  rejectOrder: Joi.object({
+    reason: Joi.string().trim().min(1).max(500).required(),
+  }),
+
   shipOrder: Joi.object({
     trackingNumber: Joi.string().required(),
     courierName: Joi.string().required(),

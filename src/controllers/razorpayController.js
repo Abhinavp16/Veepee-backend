@@ -1,3 +1,4 @@
+const { CONFIRMATION_PENDING_MESSAGE } = require('../services/orderConfirmationService');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { Order, Payment, Settings } = require('../models');
@@ -43,6 +44,14 @@ exports.createOrder = async (req, res, next) => {
     // Check if order belongs to user
     if (order.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (order.confirmationStatus === 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: CONFIRMATION_PENDING_MESSAGE,
+        error: { code: 'ORDER_AWAITING_CONFIRMATION' },
+      });
     }
 
     // Check if already paid

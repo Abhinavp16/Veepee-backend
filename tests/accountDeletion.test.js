@@ -8,7 +8,7 @@ const assert = require('assert');
 //   ACCOUNT_DELETION_TEST_MONGODB_URI=mongodb://127.0.0.1:27231/oxon_deletion_test node tests/accountDeletion.test.js
 
 process.env.JWT_SECRET = 'test-access-secret-0123456789-abcdefghij';
-process.env.RATE_LIMIT_MAX_REQUESTS = '10000';
+process.env.API_RATE_LIMIT_MAX = '10000';
 process.env.NODE_ENV = 'test';
 // No Firebase credentials in tests: storage is stubbed below.
 delete process.env.FIREBASE_PROJECT_ID;

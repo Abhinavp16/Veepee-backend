@@ -19,7 +19,7 @@ Object.assign(process.env, {
   JWT_ACCESS_EXPIRY: process.env.JWT_ACCESS_EXPIRY || '15m',
   JWT_REFRESH_EXPIRY: '7d',
   CRON_SECRET: 'dev-cron-secret',
-  RATE_LIMIT_MAX_REQUESTS: '100000',
+  API_RATE_LIMIT_MAX: process.env.API_RATE_LIMIT_MAX || '100000',
 });
 
 module.exports = { uri };

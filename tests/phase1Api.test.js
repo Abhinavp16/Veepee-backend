@@ -7,7 +7,7 @@ const assert = require('assert');
 //   PHASE1_TEST_MONGODB_URI=mongodb://127.0.0.1:27231/oxon_phase1_test node tests/phase1Api.test.js
 
 process.env.JWT_SECRET = 'test-access-secret-0123456789-abcdefghij';
-process.env.RATE_LIMIT_MAX_REQUESTS = '10000';
+process.env.API_RATE_LIMIT_MAX = '10000';
 process.env.NODE_ENV = 'test';
 delete process.env.FIREBASE_PROJECT_ID;
 delete process.env.FIREBASE_PRIVATE_KEY;

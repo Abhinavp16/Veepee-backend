@@ -5,22 +5,27 @@ const accountDeletionController = require('../controllers/accountDeletionControl
 const { protect, authorize, buyerOrWholesaler } = require('../middlewares/auth');
 const { uploadAvatar, uploadProductImages } = require('../config/cloudinary');
 const validate = require('../middlewares/validate');
+const { createAuthLimiter } = require('../middlewares/rateLimits');
 const { authValidation } = require('../validations');
 
-router.post('/register', validate(authValidation.register), authController.register);
-router.post('/register/wholesaler', validate(authValidation.registerWholesaler), authController.registerWholesaler);
-router.post('/register-phone', validate(authValidation.registerPhone), authController.registerWithPhone);
-router.post('/register-phone/wholesaler', validate(authValidation.registerPhoneWholesaler), authController.registerWholesalerWithPhone);
-router.post('/login', validate(authValidation.login), authController.login);
-router.post('/staff-login', validate(authValidation.staffLogin), authController.staffLogin);
-router.post('/login-phone', validate(authValidation.loginPhone), authController.loginWithPhone);
-router.post('/google', validate(authValidation.googleAuth), authController.googleAuth);
-router.post('/send-otp', validate(authValidation.sendOtp), authController.sendOtp);
-router.post('/verify-phone', validate(authValidation.verifyPhone), authController.verifyPhone);
+// Failed sign-ins, sign-ups and code requests are limited per phone/email and
+// per address; successful ones are never counted.
+const authLimiter = createAuthLimiter();
+
+router.post('/register', authLimiter, validate(authValidation.register), authController.register);
+router.post('/register/wholesaler', authLimiter, validate(authValidation.registerWholesaler), authController.registerWholesaler);
+router.post('/register-phone', authLimiter, validate(authValidation.registerPhone), authController.registerWithPhone);
+router.post('/register-phone/wholesaler', authLimiter, validate(authValidation.registerPhoneWholesaler), authController.registerWholesalerWithPhone);
+router.post('/login', authLimiter, validate(authValidation.login), authController.login);
+router.post('/staff-login', authLimiter, validate(authValidation.staffLogin), authController.staffLogin);
+router.post('/login-phone', authLimiter, validate(authValidation.loginPhone), authController.loginWithPhone);
+router.post('/google', authLimiter, validate(authValidation.googleAuth), authController.googleAuth);
+router.post('/send-otp', authLimiter, validate(authValidation.sendOtp), authController.sendOtp);
+router.post('/verify-phone', authLimiter, validate(authValidation.verifyPhone), authController.verifyPhone);
 router.post('/refresh-token', validate(authValidation.refreshToken), authController.refreshToken);
 router.post('/logout', protect, validate(authValidation.logout), authController.logout);
 router.put('/preferences', protect, validate(authValidation.updatePreferences), authController.updatePreferences);
-router.post('/change-password', protect, validate(authValidation.changePassword), authController.changePassword);
+router.post('/change-password', protect, authLimiter, validate(authValidation.changePassword), authController.changePassword);
 router.get('/me', protect, authController.getMe);
 router.put('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
 router.get('/addresses', protect, authController.getAddresses);

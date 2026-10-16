@@ -1,6 +1,7 @@
 const { User, Order, Negotiation, DeviceToken, Notification } = require('../../models');
 const notificationService = require('../../services/notificationService');
-const { NotFoundError } = require('../../utils/errors');
+const mongoose = require('mongoose');
+const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { USER_ROLES } = require('../../utils/constants');
 
@@ -158,43 +159,55 @@ exports.upgradeCustomer = async (req, res, next) => {
   }
 };
 
+// Sends the admin's message to the selected people: always saved in their
+// in-app inbox, and pushed to every phone they are signed in on.
 exports.sendNotification = async (req, res, next) => {
   try {
-    const { userIds, title, body } = req.body;
-
-    const tokens = await DeviceToken.find({
-      userId: { $in: userIds },
-      isActive: true,
-    }).select('fcmToken');
-
-    if (!tokens || tokens.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'No active device tokens found for selected customers.',
-      });
+    const { title, body } = req.body;
+    const requested = [...new Set(req.body.userIds.map(String))]
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const users = await User.find({ _id: { $in: requested }, isActive: { $ne: false } }).select('_id').lean();
+    const userIds = users.map((user) => user._id);
+    if (userIds.length === 0) {
+      throw new BadRequestError('None of the selected people can receive notifications', 'NO_RECIPIENTS');
     }
 
-    const fcmTokens = tokens.map((t) => t.fcmToken);
-    await notificationService.sendToMultipleDevices(fcmTokens, { title, body }, { type: 'custom_admin_notification' });
+    const data = { type: 'custom_admin_notification' };
+    await Notification.insertMany(userIds.map((userId) => ({
+      userId, title, body, type: 'general', data,
+    })));
 
-    // Save to Notification database for history in the app
-    const notificationsToSave = userIds.map(userId => ({
-      userId,
-      title,
-      body,
-      type: 'general',
-      data: { type: 'custom_admin_notification' }
-    }));
-    
-    try {
-      await Notification.insertMany(notificationsToSave);
-    } catch (saveError) {
-      console.error('Error saving notifications to DB:', saveError);
+    const tokens = await DeviceToken.find({ userId: { $in: userIds }, isActive: true }).select('fcmToken').lean();
+    const fcmTokens = [...new Set(tokens.map((t) => t.fcmToken))];
+    let delivered = 0;
+    let failed = 0;
+    let pushConfigured = Boolean(notificationService.getMessagingInstance());
+    if (pushConfigured && fcmTokens.length > 0) {
+      const result = await notificationService.sendToMultipleDevices(fcmTokens, { title, body }, data);
+      if (result === null) {
+        pushConfigured = false;
+      } else {
+        delivered = result.successCount || 0;
+        failed = result.failureCount || 0;
+      }
     }
+
+    const people = `${userIds.length} ${userIds.length === 1 ? 'person' : 'people'}`;
+    let pushText;
+    if (!pushConfigured) pushText = 'push not sent: Firebase is not set up on the server';
+    else if (fcmTokens.length === 0) pushText = 'nobody has the app signed in on a phone, so no push was sent';
+    else pushText = `push delivered to ${delivered} of ${fcmTokens.length} phones`;
 
     res.json({
       success: true,
-      message: 'Notification sent and saved successfully.',
+      message: `Saved for ${people} · ${pushText}.`,
+      data: {
+        saved: userIds.length,
+        phones: fcmTokens.length,
+        delivered,
+        failed,
+        pushConfigured,
+      },
     });
   } catch (error) {
     next(error);

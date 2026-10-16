@@ -10,6 +10,13 @@ function normalizeFcmData(data = {}) {
   );
 }
 
+const FCM_BATCH_SIZE = 500;
+// Errors meaning the app was uninstalled or the token is no longer valid.
+const DEAD_TOKEN_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+]);
+
 class NotificationService {
   constructor() {
     this.messaging = null;
@@ -113,25 +120,25 @@ class NotificationService {
         },
       };
 
-      const response = await messaging.sendEachForMulticast({
-        tokens: fcmTokens,
-        ...message,
-      });
-
-      console.log(`Notifications sent: ${response.successCount} success, ${response.failureCount} failure`);
-
-      // Handle failed tokens
-      if (response.failureCount > 0) {
-        const failedTokens = [];
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            failedTokens.push(fcmTokens[idx]);
-          }
+      // Firebase takes at most 500 tokens per call.
+      let successCount = 0;
+      let failureCount = 0;
+      const deadTokens = [];
+      for (let start = 0; start < fcmTokens.length; start += FCM_BATCH_SIZE) {
+        const batch = fcmTokens.slice(start, start + FCM_BATCH_SIZE);
+        const result = await messaging.sendEachForMulticast({ tokens: batch, ...message });
+        successCount += result.successCount;
+        failureCount += result.failureCount;
+        result.responses.forEach((resp, idx) => {
+          // Only tokens Firebase says are gone; a temporary error keeps them.
+          if (!resp.success && DEAD_TOKEN_CODES.has(resp.error?.code)) deadTokens.push(batch[idx]);
         });
-        // Remove invalid tokens
-        await this.removeInvalidTokens(failedTokens);
       }
 
+      console.log(`Notifications sent: ${successCount} success, ${failureCount} failure`);
+      if (deadTokens.length > 0) await this.removeInvalidTokens(deadTokens);
+
+      const response = { successCount, failureCount };
       return response;
     } catch (error) {
       console.error('Error sending multicast notification:', error);

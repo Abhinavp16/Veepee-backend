@@ -88,7 +88,6 @@ const mapStoredWebsiteProduct = (product = {}, order = 0) => {
   };
 };
 
-const apiStartTime = new Date();
 
 const getMongoHealth = async () => {
   const current = getDatabaseHealth();
@@ -150,46 +149,6 @@ const getMongoHealth = async () => {
   }
 };
 
-const getFirebaseHealth = () => {
-  const configured = Boolean(
-    process.env.FIREBASE_PROJECT_ID &&
-    process.env.FIREBASE_PRIVATE_KEY &&
-    process.env.FIREBASE_CLIENT_EMAIL
-  );
-
-  const result = {
-    name: 'firebase',
-    configured,
-    initialized: false,
-    messaging: false,
-    storage: false,
-    projectId: process.env.FIREBASE_PROJECT_ID || null,
-    ok: false,
-    details: null,
-  };
-
-  if (!configured) {
-    result.ok = true; // Optional service in this API
-    result.details = 'Firebase not configured (optional)';
-    return result;
-  }
-
-  try {
-    const app = getFirebaseApp();
-    result.initialized = Boolean(app);
-    result.messaging = Boolean(getMessaging());
-    result.storage = Boolean(getStorage());
-    result.ok = result.initialized && result.messaging && result.storage;
-    result.details = result.ok
-      ? 'Firebase initialized'
-      : 'Firebase configured but initialization is incomplete';
-    return result;
-  } catch (error) {
-    result.details = error.message;
-    return result;
-  }
-};
-
 router.get('/', (req, res) => {
   res.json({
     success: true,
@@ -224,39 +183,16 @@ router.get('/health/live', (req, res) => {
 });
 
 // Full health check for API dependencies
+// Public: only whether the API and its database are up. Hosts, process and
+// memory details are not shown to the internet.
 router.get('/health', async (req, res) => {
   const mongo = await getMongoHealth();
-  const firebase = getFirebaseHealth();
-
-  const checks = {
-    api: {
-      name: 'api',
-      ok: true,
-      startedAt: apiStartTime.toISOString(),
-      uptimeSec: Math.round(process.uptime()),
-      node: process.version,
-      env: process.env.NODE_ENV || 'unknown',
-      pid: process.pid,
-    },
-    mongodb: mongo,
-    firebase,
-    config: {
-      jwtConfigured: Boolean(process.env.JWT_SECRET),
-      razorpayConfigured: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
-      mongodbUriConfigured: Boolean(process.env.MONGODB_URI),
-    },
-  };
-
-  // API is considered ready when critical dependencies are healthy.
-  // MongoDB is critical; Firebase is optional unless you rely on it for specific flows.
-  const overallOk = checks.api.ok && checks.mongodb.ok;
-
-  res.status(overallOk ? 200 : 503).json({
-    success: overallOk,
-    status: overallOk ? 'ok' : 'degraded',
+  const ok = Boolean(mongo?.ok);
+  res.status(ok ? 200 : 503).json({
+    success: ok,
+    status: ok ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
-    checks,
-    memory: process.memoryUsage(),
+    checks: { api: { ok: true }, mongodb: { ok } },
   });
 });
 

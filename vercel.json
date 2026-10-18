@@ -1,4 +1,7 @@
 {
+  "regions": [
+    "bom1"
+  ],
   "crons": [
     {
       "path": "/api/v1/internal/cron/daily",

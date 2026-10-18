@@ -214,6 +214,25 @@ exports.getCompanyCategories = async (req, res, next) => {
     const company = await Company.findById(req.params.companyId).lean();
     if (!company) throw new NotFoundError('Company not found', 'COMPANY_NOT_FOUND');
 
+    // A category used by one of this brand's products belongs to the brand.
+    // Older products were saved before brands kept this list, so link any
+    // missing ones here; editing those products then works without a warning.
+    const [usedIds, usedPrimaryIds] = await Promise.all([
+      Product.distinct('categoryIds', { company: company._id }),
+      Product.distinct('primaryCategoryId', { company: company._id }),
+    ]);
+    const linked = new Set((company.categoryIds || []).map(String));
+    const missing = [...new Set([...usedIds, ...usedPrimaryIds].filter(Boolean).map(String))]
+      .filter((id) => !linked.has(id));
+    if (missing.length > 0) {
+      const existing = await Category.find({ _id: { $in: missing } }).select('_id').lean();
+      const toLink = existing.map((category) => category._id);
+      if (toLink.length > 0) {
+        await Company.updateOne({ _id: company._id }, { $addToSet: { categoryIds: { $each: toLink } } });
+        company.categoryIds = [...(company.categoryIds || []), ...toLink];
+      }
+    }
+
     const categories = await Category.find({ _id: { $in: company.categoryIds || [] } })
       .populate('parent', 'name slug')
       .lean();

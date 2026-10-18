@@ -1,4 +1,5 @@
 const { Company, Category } = require('../models');
+const { getCachedCategories } = require('./categoryDiscountCache');
 
 const DISCOUNT_FIELDS = '+customerDiscountPercent +wholesalerDiscountPercent';
 
@@ -20,7 +21,7 @@ const loadDiscountContext = async (products) => {
     companyIds.length
       ? Company.find({ _id: { $in: companyIds } }).select(DISCOUNT_FIELDS).lean()
       : [],
-    Category.find({}).select(`parent ${DISCOUNT_FIELDS}`).lean(),
+    getCachedCategories(() => Category.find({}).select(`parent ${DISCOUNT_FIELDS}`).lean()),
   ]);
   return {
     companies: new Map(companies.map((c) => [idOf(c), c])),

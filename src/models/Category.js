@@ -69,4 +69,10 @@ categorySchema.virtual('subcategories', {
 categorySchema.set('toJSON', { virtuals: true });
 categorySchema.set('toObject', { virtuals: true });
 
+// Discounts are read from a short-lived cache; any change clears it.
+const clearDiscountCache = () => require('../services/categoryDiscountCache').clearCategoryCache();
+for (const op of ['save', 'insertMany', 'updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete', 'bulkWrite']) {
+  categorySchema.post(op, clearDiscountCache);
+}
+
 module.exports = mongoose.model('Category', categorySchema);

@@ -8,12 +8,16 @@ const { assertQuantityAllowed, quantityRules } = require('../utils/quantityRules
 const CART_PRODUCT_FIELDS =
   'name nameHindi slug mrp retailPrice wholesalePrice stock images status company categoryIds primaryCategoryId packSize priceUnit minWholesaleQuantity minCustomerQuantity comingSoon expectedLaunchDate pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
 
-const populateCartItems = async (cart, userRole = 'guest') => {
-  const productIds = cart.items.map(item => item.productId);
-  const products = await Product.find({ _id: { $in: productIds } })
-    .select(CART_PRODUCT_FIELDS)
-    .lean();
-  const ctx = await loadDiscountContext(products);
+// `known` are products already loaded in this request (not loaded again);
+// `ctx` is a discount context already built for every cart product.
+const populateCartItems = async (cart, userRole = 'guest', { known = [], ctx: givenCtx } = {}) => {
+  const knownIds = new Set(known.map((p) => String(p._id)));
+  const missingIds = cart.items.map(item => item.productId).filter((id) => !knownIds.has(String(id)));
+  const fetched = missingIds.length > 0
+    ? await Product.find({ _id: { $in: missingIds } }).select(CART_PRODUCT_FIELDS).lean()
+    : [];
+  const products = [...known, ...fetched];
+  const ctx = givenCtx || await loadDiscountContext(products);
   const now = new Date();
 
   const productMap = products.reduce((acc, p) => {
@@ -86,16 +90,16 @@ exports.addItem = async (req, res, next) => {
     const userRole = req.user?.role || 'guest';
     const { productId, quantity } = req.body;
 
-    const product = await Product.findById(productId);
+    // Few round trips: the database may be far from the server.
+    const [product, existingCart] = await Promise.all([
+      Product.findById(productId).select(CART_PRODUCT_FIELDS).lean(),
+      Cart.findOne({ userId: req.user._id }),
+    ]);
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
     assertPurchasable(product);
-
-    let cart = await Cart.findOne({ userId: req.user._id });
-    if (!cart) {
-      cart = new Cart({ userId: req.user._id, items: [] });
-    }
+    const cart = existingCart || new Cart({ userId: req.user._id, items: [] });
 
     // Rules apply to what the cart will hold, not just this one addition.
     const existing = cart.items.find(item => item.productId.toString() === String(productId));
@@ -105,13 +109,22 @@ exports.addItem = async (req, res, next) => {
       throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
     }
 
-    const ctx = await loadDiscountContext([product]);
+    // Price every cart product with one discount lookup.
+    const others = cart.items
+      .map(item => item.productId)
+      .filter((id) => String(id) !== String(productId));
+    const otherProducts = others.length > 0
+      ? await Product.find({ _id: { $in: others } }).select(CART_PRODUCT_FIELDS).lean()
+      : [];
+    const known = [product, ...otherProducts];
+    const ctx = await loadDiscountContext(known);
     const priceToUse = priceFor(product, userRole, ctx).price;
 
     cart.addItem(productId, quantity, priceToUse);
-    await cart.save();
-
-    const data = await populateCartItems(cart, userRole);
+    const [, data] = await Promise.all([
+      cart.save(),
+      populateCartItems(cart, userRole, { known, ctx }),
+    ]);
     res.json({
       success: true,
       message: 'Item added to cart',
@@ -128,7 +141,10 @@ exports.updateItemQuantity = async (req, res, next) => {
     const { productId } = req.params;
     const { quantity } = req.body;
 
-    const product = await Product.findById(productId);
+    const [product, cart] = await Promise.all([
+      Product.findById(productId).select(CART_PRODUCT_FIELDS).lean(),
+      Cart.findOne({ userId: req.user._id }),
+    ]);
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
@@ -138,16 +154,15 @@ exports.updateItemQuantity = async (req, res, next) => {
     if (product.stock < quantity) {
       throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
     }
-
-    const cart = await Cart.findOne({ userId: req.user._id });
     if (!cart) {
       throw new NotFoundError('Cart not found', 'CART_NOT_FOUND');
     }
 
     cart.updateItemQuantity(productId, quantity);
-    await cart.save();
-
-    const data = await populateCartItems(cart, userRole);
+    const [, data] = await Promise.all([
+      cart.save(),
+      populateCartItems(cart, userRole, { known: [product] }),
+    ]);
     res.json({
       success: true,
       message: 'Cart updated',
@@ -169,9 +184,7 @@ exports.removeItem = async (req, res, next) => {
     }
 
     cart.removeItem(productId);
-    await cart.save();
-
-    const data = await populateCartItems(cart, userRole);
+    const [, data] = await Promise.all([cart.save(), populateCartItems(cart, userRole)]);
     res.json({
       success: true,
       message: 'Item removed from cart',

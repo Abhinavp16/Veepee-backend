@@ -140,11 +140,14 @@ exports.getProducts = async (req, res, next) => {
       sortOption = { [sortField]: sortOrder, _id: sortOrder };
     }
 
+    // Names sort as people read them: "6N70" before "6N200", case ignored.
+    const nameSort = Object.prototype.hasOwnProperty.call(sortOption, 'name');
     const [products, total] = await Promise.all([
       Product.find(query)
         .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
         .populate('company', 'name')
         .populate(productCategoryPopulate)
+        .collation(nameSort ? { locale: 'en', strength: 2, numericOrdering: true } : undefined)
         .sort(sortOption)
         .skip(skip)
         .limit(limit)

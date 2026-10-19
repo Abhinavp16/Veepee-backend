@@ -362,9 +362,12 @@ const createOrderReceiptPdfBuffer = async ({ order, settings }) => {
     });
   }
 
-  ensureSpace(30);
+  ensureSpace(42);
   cursorY -= 14;
   drawText('This is a computer-generated receipt. Thank you for shopping with OXON.', MARGIN, cursorY, { size: 9 });
+  cursorY -= 12;
+  const contact = settings?.businessPhone ? ` at ${settings.businessPhone}` : '';
+  drawText(`For the GST original, please contact us${contact}.`, MARGIN, cursorY, { size: 9, font: 'F2' });
 
   if (commands.length > 0) {
     pushPage();

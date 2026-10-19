@@ -104,7 +104,7 @@ async function run() {
     const order = await Order.findById(orderId).lean();
     for (const expected of [
       'Order Receipt', 'GSTIN: 22AAXFV7313A1Z8', order.orderNumber, `Receipt Pump ${suffix}`, `SKU: ${order.items[0].productSnapshot.sku}`,
-      'Delivery', 'Extra Discount \\(10%\\)', '- Rs. 300.00', 'Grand Total', 'Rs. 2,850.00', 'Awaiting payment', '12 MG Road',
+      'Delivery', 'Extra Discount \\(10%\\)', '- Rs. 300.00', 'Grand Total', 'Rs. 2,850.00', 'Awaiting payment', '12 MG Road', 'For the GST original, please contact us',
     ]) {
       assert.ok(text.includes(expected), `receipt shows ${expected}`);
     }

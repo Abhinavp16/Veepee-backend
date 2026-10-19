@@ -202,6 +202,8 @@ const confirmationResponse = (order, message) => ({
     subtotal: order.subtotal,
     deliveryFee: order.deliveryFee,
     discount: order.discount,
+    extraDiscount: order.extraDiscount,
+    extraDiscountPercent: order.extraDiscountPercent,
     total: order.total,
   },
 });
@@ -212,6 +214,8 @@ exports.confirmOrder = async (req, res, next) => {
     const order = await orderConfirmationService.confirmOrder({
       orderId: req.params.id,
       deliveryCharge: req.body.deliveryCharge,
+      extraDiscount: req.body.extraDiscount,
+      extraDiscountType: req.body.extraDiscountType,
       actorId: req.user._id,
     });
     res.json(confirmationResponse(order, 'Order confirmed. The customer has been asked to pay.'));

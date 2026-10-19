@@ -42,21 +42,58 @@ const notify = async (order, template, params, extraData = {}) => {
   }
 };
 
-/** Adds the delivery charge, settles the total and asks the customer to pay. */
-async function confirmOrder({ orderId, deliveryCharge, actorId }) {
+/**
+ * The extra discount in rupees. A percentage is of the products' value after
+ * any coupon; the discount can't be more than the order total.
+ */
+const resolveExtraDiscount = (order, deliveryFee, value, type) => {
+  const amount = Math.max(0, Number(value) || 0);
+  const couponDiscount = order.discount || 0;
+  let extraDiscount = round2(amount);
+  let extraDiscountPercent = null;
+  if (type === 'percent') {
+    if (amount > 100) {
+      throw new BadRequestError('The extra discount can be at most 100%', 'INVALID_EXTRA_DISCOUNT');
+    }
+    extraDiscountPercent = amount;
+    extraDiscount = round2((Math.max(order.subtotal - couponDiscount, 0) * amount) / 100);
+  }
+  const maxDiscount = round2(Math.max(order.subtotal + deliveryFee - couponDiscount, 0));
+  if (extraDiscount > maxDiscount) {
+    throw new BadRequestError(
+      `The extra discount can be at most ₹${rupees(maxDiscount)}, the order total`,
+      'INVALID_EXTRA_DISCOUNT'
+    );
+  }
+  return { extraDiscount, extraDiscountPercent };
+};
+
+/**
+ * Adds the delivery charge and any extra discount, settles the total and asks
+ * the customer to pay. The extra discount is set only here, once.
+ */
+async function confirmOrder({ orderId, deliveryCharge, extraDiscount: discountValue, extraDiscountType = 'amount', actorId }) {
   const order = await loadPendingOrder(orderId);
   const deliveryFee = round2(Math.max(0, Number(deliveryCharge) || 0));
+  const { extraDiscount, extraDiscountPercent } = resolveExtraDiscount(
+    order, deliveryFee, discountValue, extraDiscountType
+  );
 
   order.deliveryFee = deliveryFee;
-  order.total = round2(Math.max(order.subtotal + deliveryFee - (order.discount || 0), 0));
+  order.extraDiscount = extraDiscount;
+  order.extraDiscountPercent = extraDiscountPercent;
+  order.total = round2(Math.max(order.subtotal + deliveryFee - (order.discount || 0) - extraDiscount, 0));
   order.confirmationStatus = ORDER_CONFIRMATION.CONFIRMED;
   order.confirmedAt = new Date();
   order.confirmedBy = actorId;
+  const discountNote = extraDiscount > 0
+    ? ` · extra discount ₹${rupees(extraDiscount)}${extraDiscountPercent != null ? ` (${extraDiscountPercent}%)` : ''}`
+    : '';
   order.statusHistory.push({
     status: order.status,
-    note: deliveryFee > 0
+    note: (deliveryFee > 0
       ? `Order confirmed · delivery ₹${rupees(deliveryFee)} added`
-      : 'Order confirmed · free delivery',
+      : 'Order confirmed · free delivery') + discountNote,
     updatedBy: actorId,
     timestamp: new Date(),
   });
@@ -68,10 +105,17 @@ async function confirmOrder({ orderId, deliveryCharge, actorId }) {
     { $set: { amount: order.total } }
   );
 
+  const template = (deliveryFee > 0 ? 'orderConfirmedPay' : 'orderConfirmedPayFreeDelivery')
+    + (extraDiscount > 0 ? 'Discount' : '');
   await notify(
     order,
-    deliveryFee > 0 ? 'orderConfirmedPay' : 'orderConfirmedPayFreeDelivery',
-    { orderNumber: order.orderNumber, deliveryFee: rupees(deliveryFee), total: rupees(order.total) },
+    template,
+    {
+      orderNumber: order.orderNumber,
+      deliveryFee: rupees(deliveryFee),
+      extraDiscount: rupees(extraDiscount),
+      total: rupees(order.total),
+    },
     { action: 'pay' }
   );
   return order;

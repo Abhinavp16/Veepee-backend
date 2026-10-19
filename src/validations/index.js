@@ -482,6 +482,8 @@ const adminValidation = {
 
   confirmOrder: Joi.object({
     deliveryCharge: Joi.number().min(0).max(10000000).required(),
+    extraDiscount: Joi.number().min(0).max(10000000).default(0),
+    extraDiscountType: Joi.string().valid('amount', 'percent').default('amount'),
   }),
 
   rejectOrder: Joi.object({

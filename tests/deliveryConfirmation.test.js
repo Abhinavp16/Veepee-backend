@@ -147,6 +147,39 @@ async function run() {
     assert.strictEqual(rejected.confirmationNote, 'We do not deliver to this pincode');
     assert.ok(await Notification.findOne({ userId: buyer.user._id, 'data.orderId': String(secondOrderId) }));
 
+    // An extra discount can be given at confirmation, in rupees or percent.
+    const placeOrder = async () => {
+      const placed = await call('POST', '/orders', { token: buyer.token, body: { items: [{ productId: String(product._id), quantity: 2 }], shippingAddress: address } });
+      assert.strictEqual(placed.status, 201, JSON.stringify(placed.json));
+      made.orders.push(placed.json.data.orderId);
+      return placed.json.data.orderId;
+    };
+    const discounted = await placeOrder(); // 2 x 1000 = 2000
+    res = await call('PUT', `/admin/orders/${discounted}/confirm`, { token: staff.token, body: { deliveryCharge: 300, extraDiscount: 101, extraDiscountType: 'percent' } });
+    assert.strictEqual(res.status, 400, 'more than 100% refused');
+    res = await call('PUT', `/admin/orders/${discounted}/confirm`, { token: staff.token, body: { deliveryCharge: 300, extraDiscount: 2301 } });
+    assert.strictEqual(res.status, 400, 'more than the order total refused');
+    assert.strictEqual(codeOf(res), 'INVALID_EXTRA_DISCOUNT');
+    assert.strictEqual((await Order.findById(discounted)).confirmationStatus, 'pending', 'a refused discount leaves the order waiting');
+    res = await call('PUT', `/admin/orders/${discounted}/confirm`, { token: staff.token, body: { deliveryCharge: 300, extraDiscount: 250 } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(res.json.data.extraDiscount, 250);
+    assert.strictEqual(res.json.data.total, 2050, '2000 + 300 - 250');
+    assert.strictEqual((await Payment.findOne({ orderId: discounted })).amount, 2050);
+    const toldDiscount = await Notification.findOne({ userId: buyer.user._id, 'data.orderId': String(discounted) });
+    assert.ok(/250/.test(toldDiscount.body) && /2,050|2050/.test(toldDiscount.body), toldDiscount.body);
+    assert.ok((await Order.findById(discounted)).statusHistory.some((h) => /extra discount ₹250/.test(h.note || '')));
+    // Only at confirmation: a confirmed order can't be re-discounted.
+    res = await call('PUT', `/admin/orders/${discounted}/confirm`, { token: staff.token, body: { deliveryCharge: 300, extraDiscount: 500 } });
+    assert.strictEqual(res.status, 400);
+
+    const percentOff = await placeOrder();
+    res = await call('PUT', `/admin/orders/${percentOff}/confirm`, { token: staff.token, body: { deliveryCharge: 0, extraDiscount: 10, extraDiscountType: 'percent' } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(res.json.data.extraDiscount, 200, '10% of 2000');
+    assert.strictEqual(res.json.data.extraDiscountPercent, 10);
+    assert.strictEqual(res.json.data.total, 1800);
+
     // Orders from before this change need no confirmation.
     const legacy = await Order.create({
       userId: other.user._id,

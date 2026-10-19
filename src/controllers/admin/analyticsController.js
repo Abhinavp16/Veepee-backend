@@ -268,10 +268,32 @@ exports.getPotentialCustomers = async (req, res, next) => {
     const { period = '7d', page = 1, limit = 30 } = req.query;
     const daysMap = { '3d': 3, '7d': 7, '14d': 14, '30d': 30 };
     const days = daysMap[period] || 7;
-    const startDate = new Date();
+    let startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const SIX_HOURS_MS = 1 * 60 * 1000; // TODO: revert to 6 * 60 * 60 * 1000 after testing
+    // Filters: at least this many views, last viewed between two times, and
+    // the order (most views first, or most recently viewed first).
+    const toDate = (value) => {
+      if (!value) return null;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+    const minViews = Math.max(parseInt(req.query.minViews, 10) || 1, 1);
+    const lastViewedFrom = toDate(req.query.lastViewedFrom);
+    const lastViewedTo = toDate(req.query.lastViewedTo);
+    const sortStage = req.query.sort === 'recent'
+      ? { lastViewed: -1, viewCount: -1 }
+      : { viewCount: -1, lastViewed: -1 };
+    // A last-viewed date before the period still finds those views.
+    if (lastViewedFrom && lastViewedFrom < startDate) startDate = lastViewedFrom;
+
+    // Someone becomes a lead 5 minutes after viewing without adding to cart.
+    const LEAD_WAIT_MS = 5 * 60 * 1000;
+    const latestLeadView = new Date(Date.now() - LEAD_WAIT_MS);
+    const lastViewedMatch = {
+      $lte: lastViewedTo && lastViewedTo < latestLeadView ? lastViewedTo : latestLeadView,
+      ...(lastViewedFrom && { $gte: lastViewedFrom }),
+    };
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Step 1: Get unique (userId, productId, latestViewTime) for logged-in users
@@ -293,10 +315,12 @@ exports.getPotentialCustomers = async (req, res, next) => {
           viewCount: { $sum: 1 },
         },
       },
-      // Only include views older than 6 hours (give them time to convert)
+      // Only views older than the wait (time to add to cart first), within
+      // the chosen last-viewed range and with enough views.
       {
         $match: {
-          lastViewed: { $lte: new Date(Date.now() - SIX_HOURS_MS) },
+          lastViewed: lastViewedMatch,
+          viewCount: { $gte: minViews },
         },
       },
       // Lookup conversion events (cart_add or purchase) for same user+product after the view
@@ -324,8 +348,7 @@ exports.getPotentialCustomers = async (req, res, next) => {
       },
       // Keep only those with NO conversions
       { $match: { conversions: { $size: 0 } } },
-      // Sort by view count desc (most interested first)
-      { $sort: { viewCount: -1, lastViewed: -1 } },
+      { $sort: sortStage },
       // Facet for pagination + count
       {
         $facet: {

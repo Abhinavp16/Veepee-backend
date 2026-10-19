@@ -107,6 +107,19 @@ const orderSchema = new mongoose.Schema({
     enum: ['affiliate', 'offer'],
     default: null,
   },
+  // Given by the shop when it confirms the order, on top of any coupon.
+  extraDiscount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  // Set when that discount was entered as a percentage of the products.
+  extraDiscountPercent: {
+    type: Number,
+    default: null,
+    min: 0,
+    max: 100,
+  },
   affiliateDiscountAmount: {
     type: Number,
     default: 0,

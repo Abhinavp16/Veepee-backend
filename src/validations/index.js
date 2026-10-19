@@ -523,7 +523,10 @@ const adminValidation = {
     businessName: Joi.string().max(200),
     businessPhone: Joi.string(),
     businessEmail: Joi.string().email(),
-    businessAddress: Joi.string(),
+    businessAddress: Joi.string().allow('').max(500),
+    gstin: Joi.string().trim().uppercase().allow('')
+      .pattern(/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/)
+      .messages({ 'string.pattern.base': 'GSTIN must be 15 characters, like 22AAXFV7313A1Z8' }),
     upiId: Joi.string(),
     upiDisplayName: Joi.string(),
     bankName: Joi.string().allow('', null),

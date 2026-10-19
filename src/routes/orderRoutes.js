@@ -13,6 +13,7 @@ router.post('/preview-coupon', validate(orderValidation.previewCoupon), orderCon
 router.post('/', validate(orderValidation.createFromCart), orderController.createOrderFromCart);
 router.post('/from-group', validate(orderValidation.createFromGroup), orderController.createOrderFromGroup);
 router.post('/from-negotiation', validate(orderValidation.createFromNegotiation), orderController.createOrderFromNegotiation);
+router.get('/:id/receipt', orderController.getOrderReceipt);
 router.get('/:id', orderController.getOrderById);
 
 module.exports = router;

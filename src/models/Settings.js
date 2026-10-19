@@ -24,6 +24,13 @@ const settingsSchema = new mongoose.Schema({
   businessPhone: String,
   businessEmail: String,
   businessAddress: String,
+  // Printed on order receipts; empty hides it.
+  gstin: {
+    type: String,
+    default: '22AAXFV7313A1Z8',
+    trim: true,
+    uppercase: true,
+  },
 
   upiId: {
     type: String,

@@ -5,6 +5,7 @@ const { ORDER_CONFIRMATION, ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_
 
 const { loadDiscountContext, priceFor } = require('../services/productPricingService');
 const { assertPurchasable } = require('../utils/productAvailability');
+const { isReceiptAvailable, sendOrderReceipt } = require('../utils/orderReceiptPdf');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
 const { notifyTeam } = require('../services/adminNotificationService');
 const { loadGroup, summarizeGroup } = require('../services/requirementGroupService');
@@ -729,6 +730,20 @@ exports.createOrderFromGroup = async (req, res, next) => {
 
     const placed = await placeNegotiatedOrder({ user: req.user, negotiations: payable, shippingAddress, customerNote, inputCode });
     res.status(201).json(negotiatedOrderResponse(placed));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// The customer's own order receipt PDF, once the shop has confirmed it.
+exports.getOrderReceipt = async (req, res, next) => {
+  try {
+    const order = await Order.findOne({ _id: req.params.id, userId: req.user._id }).lean().catch(() => null);
+    if (!order) throw new NotFoundError('Order not found', 'ORDER_NOT_FOUND');
+    if (!isReceiptAvailable(order)) {
+      throw new BadRequestError('Your receipt will be ready once we confirm the order', 'RECEIPT_NOT_AVAILABLE');
+    }
+    await sendOrderReceipt(res, order, await Settings.getSettings());
   } catch (error) {
     next(error);
   }

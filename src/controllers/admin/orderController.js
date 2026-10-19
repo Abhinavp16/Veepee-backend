@@ -1,4 +1,5 @@
-const { Order, Payment, Product, StockLog } = require('../../models');
+const { Order, Payment, Product, StockLog, Settings } = require('../../models');
+const { isReceiptAvailable, sendOrderReceipt } = require('../../utils/orderReceiptPdf');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { ORDER_STATUS } = require('../../utils/constants');
@@ -207,6 +208,20 @@ const confirmationResponse = (order, message) => ({
     total: order.total,
   },
 });
+
+// The order receipt PDF, once the order is confirmed.
+exports.getOrderReceipt = async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id).lean().catch(() => null);
+    if (!order) throw new NotFoundError('Order not found', 'ORDER_NOT_FOUND');
+    if (!isReceiptAvailable(order)) {
+      throw new BadRequestError('A receipt is available once the order is confirmed', 'RECEIPT_NOT_AVAILABLE');
+    }
+    await sendOrderReceipt(res, order, await Settings.getSettings());
+  } catch (error) {
+    next(error);
+  }
+};
 
 // Adds the delivery charge and lets the customer pay.
 exports.confirmOrder = async (req, res, next) => {

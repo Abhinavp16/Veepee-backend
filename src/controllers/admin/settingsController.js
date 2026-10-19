@@ -26,6 +26,7 @@ exports.updateSettings = async (req, res, next) => {
       'businessPhone',
       'businessEmail',
       'businessAddress',
+      'gstin',
       'upiId',
       'upiDisplayName',
       'minOrderAmount',

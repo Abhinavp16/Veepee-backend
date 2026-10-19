@@ -87,6 +87,7 @@ router.put('/negotiations/:id/counter', operationsStaff, validate(adminValidatio
 // Staff can fulfil orders, but payment verification remains Administrator-only.
 router.get('/orders', operationsStaff, adminOrderController.getOrders);
 router.get('/orders/:id', operationsStaff, adminOrderController.getOrderById);
+router.get('/orders/:id/receipt', operationsStaff, adminOrderController.getOrderReceipt);
 router.put('/orders/:id/status', operationsStaff, validate(adminValidation.updateOrderStatus), adminOrderController.updateOrderStatus);
 router.put('/orders/:id/ship', operationsStaff, validate(adminValidation.shipOrder), adminOrderController.shipOrder);
 // New orders: add the delivery charge and confirm, or reject with a reason.

@@ -149,6 +149,77 @@ async function run() {
     res = await send('POST', '/admin/analytics/potential-customers/contacted', { leads: [] });
     assert.strictEqual(res.status, 400);
 
+    // 8. Grouped by person: one row each, with their products inside.
+    const categoryId = new mongoose.Types.ObjectId();
+    const companyId = new mongoose.Types.ObjectId();
+    const saw = await Product.create({
+      name: `Lead Saw ${suffix}`, category: 'tools', categoryIds: [categoryId], company: companyId,
+      mrp: 900, retailPrice: 700, wholesalePrice: 600, sku: `LEADSAW-${suffix}`, stock: 4, status: 'active',
+    });
+    made.products.push(saw._id);
+    await Analytics.insertMany([
+      ...[30, 40].map((m) => ({ productId: saw._id, userId: asha._id, eventType: 'view', timestamp: minutesAgo(m) })),
+      { productId: saw._id, userId: bala._id, eventType: 'view', timestamp: minutesAgo(20) },
+    ]);
+    await User.updateOne({ _id: chetan._id }, { $set: { role: 'wholesaler' } });
+    let lastSummary = null;
+    const people = async (query) => {
+      const res = await fetch(`${base}/admin/analytics/potential-customers?groupBy=person&period=7d&search=${suffix}&${query}`, { headers: { Authorization: `Bearer ${token}` } });
+      const json = await res.json();
+      assert.strictEqual(res.status, 200, JSON.stringify(json));
+      lastCounts = json.data.counts;
+      lastSummary = json.data.summary;
+      return json.data.people;
+    };
+    const personNames = (list) => list.map((person) => person.user.name.replace(` ${suffix}`, ''));
+
+    let list = await people('');
+    assert.deepStrictEqual(personNames(list), ['Chetan', 'Bala', 'Asha'], 'most recently active first');
+    const ashaRow = list.find((person) => person.user.name.startsWith('Asha'));
+    assert.strictEqual(ashaRow.productCount, 2);
+    assert.strictEqual(ashaRow.viewCount, 8);
+    assert.strictEqual(ashaRow.watchSeconds, 1890);
+    assert.strictEqual(ashaRow.interest, 'Hot', 'Hot when any product is Hot');
+    assert.deepStrictEqual(ashaRow.products.map((item) => item.product.name), [`Lead Pump ${suffix}`, `Lead Saw ${suffix}`], 'Hot products first');
+    assert.strictEqual(ashaRow.products[1].interest, 'Browsing');
+    assert.strictEqual(String(ashaRow.products[1].productId), String(saw._id));
+    assert.deepStrictEqual(lastSummary, { people: 3, hotPeople: 1, products: 2 });
+
+    assert.deepStrictEqual(personNames(await people('sort=products')), ['Bala', 'Asha', 'Chetan']);
+    assert.deepStrictEqual(personNames(await people('sort=views')), ['Asha', 'Chetan', 'Bala']);
+    assert.deepStrictEqual(personNames(await people('minProducts=2')), ['Bala', 'Asha']);
+    assert.deepStrictEqual(personNames(await people('interest=hot')), ['Asha']);
+    assert.deepStrictEqual(personNames(await people('interest=warm')), ['Chetan']);
+    assert.deepStrictEqual(personNames(await people('interest=high')), ['Chetan', 'Asha']);
+    assert.deepStrictEqual(personNames(await people('role=wholesaler')), ['Chetan']);
+    assert.deepStrictEqual(personNames(await people('role=buyer')), ['Bala', 'Asha']);
+    res = await fetch(`${base}/admin/analytics/potential-customers?groupBy=person&period=7d&search=${asha.phone}`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.deepStrictEqual(personNames((await res.json()).data.people), ['Asha'], 'search by phone');
+    res = await fetch(`${base}/admin/analytics/potential-customers?groupBy=person&period=7d&search=${encodeURIComponent('(+')}`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.strictEqual(res.status, 200, 'search text is not a pattern');
+    assert.deepStrictEqual((await res.json()).data.people, []);
+
+    // 9. Only some products: category, brand, or name / SKU.
+    for (const query of [`categoryId=${categoryId}`, `companyId=${companyId}`, 'product=lead%20saw', `product=LEADSAW-${suffix}`]) {
+      list = await people(query);
+      assert.deepStrictEqual(personNames(list), ['Bala', 'Asha'], query);
+      assert.ok(list.every((person) => person.productCount === 1 && person.products[0].product.name === `Lead Saw ${suffix}`), query);
+    }
+    leads = await get(`period=7d&categoryId=${categoryId}`);
+    assert.deepStrictEqual(names(leads).sort(), ['Asha', 'Bala'], 'filters work without grouping too');
+
+    // 10. A person is contacted once all their products are.
+    res = await send('POST', '/admin/analytics/potential-customers/contacted', { leads: [{ userId: String(bala._id), productId: String(product._id) }] });
+    assert.strictEqual(res.status, 200);
+    list = await people('');
+    assert.strictEqual(list.find((person) => person.user.name.startsWith('Bala')).contactedCount, 1, 'still To contact with 1 of 2 done');
+    res = await send('POST', '/admin/analytics/potential-customers/contacted', { leads: [{ userId: String(bala._id), productId: String(saw._id) }] });
+    assert.deepStrictEqual(personNames(await people('')), ['Chetan', 'Asha']);
+    assert.deepStrictEqual(lastCounts, { todo: 2, contacted: 1 });
+    list = await people('view=contacted');
+    assert.deepStrictEqual(personNames(list), ['Bala']);
+    assert.ok(new Date(list[0].lastContactAt) <= new Date());
+
     console.log('leadFilters.test.js: all checks passed');
   } finally {
     await Promise.all([

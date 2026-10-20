@@ -265,6 +265,21 @@ exports.getSalesAnalytics = async (req, res, next) => {
   }
 };
 
+// Interest from views and time on the product page: Hot 2, Warm 1, else 0.
+const INTEREST_RANK = {
+  $switch: {
+    branches: [
+      { case: { $or: [{ $gte: ['$viewCount', 5] }, { $gte: ['$watchSeconds', 120] }] }, then: 2 },
+      { case: { $or: [{ $gte: ['$viewCount', 3] }, { $gte: ['$watchSeconds', 45] }] }, then: 1 },
+    ],
+    default: 0,
+  },
+};
+const interestName = (rank) => ({
+  $switch: { branches: [{ case: { $eq: [rank, 2] }, then: 'Hot' }, { case: { $eq: [rank, 1] }, then: 'Warm' }], default: 'Browsing' },
+});
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 exports.getPotentialCustomers = async (req, res, next) => {
   try {
     const { period = '7d', page = 1, limit = 30 } = req.query;
@@ -273,6 +288,10 @@ exports.getPotentialCustomers = async (req, res, next) => {
     let startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
+    // One row per person + product, or one row per person with their
+    // products inside (groupBy=person).
+    const byPerson = req.query.groupBy === 'person';
+
     // Filters: at least this many views, last viewed between two times, and
     // the order (most views first, or most recently viewed first).
     const toDate = (value) => {
@@ -280,18 +299,39 @@ exports.getPotentialCustomers = async (req, res, next) => {
       const date = new Date(value);
       return Number.isNaN(date.getTime()) ? null : date;
     };
+    const text = (value) => (typeof value === 'string' ? value.trim().slice(0, 80) : '');
     const minViews = Math.max(parseInt(req.query.minViews, 10) || 1, 1);
+    const minProducts = Math.max(parseInt(req.query.minProducts, 10) || 1, 1);
     const lastViewedFrom = toDate(req.query.lastViewedFrom);
     const lastViewedTo = toDate(req.query.lastViewedTo);
+    const search = text(req.query.search);
+    const role = [USER_ROLES.BUYER, USER_ROLES.WHOLESALER].includes(req.query.role) ? req.query.role : null;
+    const interestMatch = { hot: 2, warm: 1, high: { $gte: 1 } }[req.query.interest];
     // "To contact" (default) or "Contacted": leads the team already messaged.
+    // A person is contacted once all their products are.
     const view = req.query.view === 'contacted' ? 'contacted' : 'todo';
     const sortStage = view === 'contacted'
       ? { 'contact.lastContactAt': -1, lastViewed: -1 }
-      : req.query.sort === 'recent'
-        ? { lastViewed: -1, viewCount: -1 }
-        : { viewCount: -1, watchSeconds: -1, lastViewed: -1 };
+      : {
+        recent: { lastViewed: -1, viewCount: -1 },
+        views: { viewCount: -1, watchSeconds: -1, lastViewed: -1 },
+        watch: { watchSeconds: -1, lastViewed: -1 },
+        products: { productCount: -1, lastViewed: -1 },
+      }[req.query.sort] || (byPerson ? { lastViewed: -1, viewCount: -1 } : { viewCount: -1, watchSeconds: -1, lastViewed: -1 });
+    if (!byPerson) delete sortStage.productCount;
     // A last-viewed date before the period still finds those views.
     if (lastViewedFrom && lastViewedFrom < startDate) startDate = lastViewedFrom;
+
+    // Only some products: by name or SKU, category or brand.
+    const productQuery = {};
+    const productText = text(req.query.product);
+    if (productText) {
+      const pattern = new RegExp(escapeRegex(productText), 'i');
+      productQuery.$or = [{ name: pattern }, { sku: pattern }];
+    }
+    if (mongoose.Types.ObjectId.isValid(req.query.categoryId)) productQuery.categoryIds = new mongoose.Types.ObjectId(req.query.categoryId);
+    if (mongoose.Types.ObjectId.isValid(req.query.companyId)) productQuery.company = new mongoose.Types.ObjectId(req.query.companyId);
+    const productIds = Object.keys(productQuery).length ? await Product.find(productQuery).distinct('_id') : null;
 
     // Someone becomes a lead 5 minutes after viewing without adding to cart.
     const LEAD_WAIT_MS = 5 * 60 * 1000;
@@ -303,12 +343,13 @@ exports.getPotentialCustomers = async (req, res, next) => {
     const pageLimit = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100);
     const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * pageLimit;
 
-    const results = await Analytics.aggregate([
+    const leadStages = [
       {
         $match: {
           eventType: { $in: [ANALYTICS_EVENTS.VIEW, ANALYTICS_EVENTS.WATCH] },
           userId: { $ne: null },
           timestamp: { $gte: startDate },
+          ...(productIds && { productId: { $in: productIds } }),
         },
       },
       // One row per person + product: views, latest view and time spent.
@@ -378,70 +419,217 @@ exports.getPotentialCustomers = async (req, res, next) => {
         $addFields: {
           contact: { $arrayElemAt: ['$contacts', 0] },
           isContacted: { $gt: [{ $size: '$contacts' }, 0] },
+          interestRank: INTEREST_RANK,
         },
       },
+      // The person: search by name, phone or business, and customer type.
       {
-        $facet: {
-          counts: [{ $group: { _id: '$isContacted', count: { $sum: 1 } } }],
-          data: [
-            { $match: { isContacted: view === 'contacted' } },
-            { $sort: sortStage },
-            { $skip: skip },
-            { $limit: pageLimit },
-            {
-              $lookup: {
-                from: 'users',
-                localField: '_id.userId',
-                foreignField: '_id',
-                as: 'user',
-              },
-            },
-            { $unwind: '$user' },
-            {
-              $lookup: {
-                from: 'products',
-                localField: '_id.productId',
-                foreignField: '_id',
-                as: 'product',
-              },
-            },
-            { $unwind: '$product' },
+        $lookup: {
+          from: 'users',
+          localField: '_id.userId',
+          foreignField: '_id',
+          pipeline: [
             {
               $project: {
                 _id: 0,
-                userId: '$_id.userId',
-                productId: '$_id.productId',
-                viewCount: 1,
-                lastViewed: 1,
-                watchSeconds: 1,
-                contact: 1,
-                user: { name: 1, email: 1, phone: 1, businessName: '$user.businessInfo.businessName' },
-                product: {
-                  name: 1,
-                  sku: '$product.sku',
-                  price: '$product.retailPrice',
-                  stock: '$product.stock',
-                  image: { $arrayElemAt: ['$product.images.url', 0] },
-                },
+                name: 1,
+                email: 1,
+                phone: 1,
+                role: 1,
+                businessName: '$businessInfo.businessName',
+                city: { $arrayElemAt: ['$savedAddresses.city', 0] },
               },
             },
           ],
+          as: 'user',
         },
       },
-    ]);
+      { $unwind: '$user' },
+      ...(role ? [{ $match: { 'user.role': role } }] : []),
+      ...(search
+        ? [{
+          $match: {
+            $or: ['user.name', 'user.phone', 'user.businessName'].map((field) => ({ [field]: new RegExp(escapeRegex(search), 'i') })),
+          },
+        }]
+        : []),
+      {
+        $lookup: {
+          from: 'products',
+          localField: '_id.productId',
+          foreignField: '_id',
+          pipeline: [
+            {
+              $project: {
+                _id: 0,
+                name: 1,
+                sku: 1,
+                slug: 1,
+                price: '$retailPrice',
+                image: { $arrayElemAt: ['$images.url', 0] },
+              },
+            },
+          ],
+          as: 'product',
+        },
+      },
+      { $unwind: '$product' },
+    ];
+
+    const leadFields = {
+      viewCount: 1,
+      lastViewed: 1,
+      watchSeconds: 1,
+      contact: 1,
+      isContacted: 1,
+      interest: interestName('$interestRank'),
+      product: 1,
+    };
+
+    let pipeline;
+    if (byPerson) {
+      pipeline = [
+        ...leadStages,
+        // Their most interesting products first.
+        { $sort: { interestRank: -1, viewCount: -1, lastViewed: -1 } },
+        {
+          $group: {
+            _id: '$_id.userId',
+            user: { $first: '$user' },
+            productCount: { $sum: 1 },
+            viewCount: { $sum: '$viewCount' },
+            watchSeconds: { $sum: '$watchSeconds' },
+            lastViewed: { $max: '$lastViewed' },
+            interestRank: { $max: '$interestRank' },
+            contactedCount: { $sum: { $cond: ['$isContacted', 1, 0] } },
+            lastContactAt: { $max: '$contact.lastContactAt' },
+            products: {
+              $push: {
+                productId: '$_id.productId',
+                viewCount: '$viewCount',
+                lastViewed: '$lastViewed',
+                watchSeconds: '$watchSeconds',
+                contact: '$contact',
+                isContacted: '$isContacted',
+                interest: interestName('$interestRank'),
+                product: '$product',
+              },
+            },
+          },
+        },
+        {
+          $addFields: {
+            isContacted: { $eq: ['$contactedCount', '$productCount'] },
+            contact: { lastContactAt: '$lastContactAt' },
+          },
+        },
+        {
+          $match: {
+            productCount: { $gte: minProducts },
+            ...(interestMatch !== undefined && { interestRank: interestMatch }),
+          },
+        },
+        {
+          $facet: {
+            counts: [{ $group: { _id: '$isContacted', count: { $sum: 1 } } }],
+            summary: [
+              { $match: { isContacted: view === 'contacted' } },
+              {
+                $group: {
+                  _id: null,
+                  people: { $sum: 1 },
+                  hotPeople: { $sum: { $cond: [{ $eq: ['$interestRank', 2] }, 1, 0] } },
+                  products: { $push: '$products.productId' },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  people: 1,
+                  hotPeople: 1,
+                  products: { $size: { $reduce: { input: '$products', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } },
+                },
+              },
+            ],
+            data: [
+              { $match: { isContacted: view === 'contacted' } },
+              { $sort: sortStage },
+              { $skip: skip },
+              { $limit: pageLimit },
+              {
+                $project: {
+                  _id: 0,
+                  userId: '$_id',
+                  user: 1,
+                  productCount: 1,
+                  viewCount: 1,
+                  watchSeconds: 1,
+                  lastViewed: 1,
+                  contactedCount: 1,
+                  lastContactAt: 1,
+                  interest: interestName('$interestRank'),
+                  products: 1,
+                },
+              },
+            ],
+          },
+        },
+      ];
+    } else {
+      pipeline = [
+        ...leadStages,
+        ...(interestMatch !== undefined ? [{ $match: { interestRank: interestMatch } }] : []),
+        {
+          $facet: {
+            counts: [{ $group: { _id: '$isContacted', count: { $sum: 1 } } }],
+            summary: [
+              { $match: { isContacted: view === 'contacted' } },
+              {
+                $group: {
+                  _id: null,
+                  people: { $addToSet: '$_id.userId' },
+                  hotPeople: { $addToSet: { $cond: [{ $eq: ['$interestRank', 2] }, '$_id.userId', '$$REMOVE'] } },
+                  products: { $addToSet: '$_id.productId' },
+                },
+              },
+              { $project: { _id: 0, people: { $size: '$people' }, hotPeople: { $size: '$hotPeople' }, products: { $size: '$products' } } },
+            ],
+            data: [
+              { $match: { isContacted: view === 'contacted' } },
+              { $sort: sortStage },
+              { $skip: skip },
+              { $limit: pageLimit },
+              {
+                $project: {
+                  _id: 0,
+                  userId: '$_id.userId',
+                  productId: '$_id.productId',
+                  user: 1,
+                  ...leadFields,
+                },
+              },
+            ],
+          },
+        },
+      ];
+    }
+
+    const results = await Analytics.aggregate(pipeline);
 
     const data = results[0]?.data || [];
     const counts = { todo: 0, contacted: 0 };
     for (const row of results[0]?.counts || []) {
       counts[row._id ? 'contacted' : 'todo'] = row.count;
     }
+    const summary = results[0]?.summary?.[0] || { people: 0, hotPeople: 0, products: 0 };
     const total = counts[view];
 
     res.json({
       success: true,
       data: {
-        potentialCustomers: data,
+        ...(byPerson ? { people: data } : { potentialCustomers: data }),
         counts,
+        summary,
         pagination: {
           page: Math.max(parseInt(page, 10) || 1, 1),
           limit: pageLimit,

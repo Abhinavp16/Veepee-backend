@@ -1,5 +1,7 @@
-const { Order, Product, Negotiation, User, Analytics, Payment } = require('../../models');
-const { ORDER_STATUS, PAYMENT_STATUS, NEGOTIATION_STATUS, PRODUCT_STATUS, USER_ROLES } = require('../../utils/constants');
+const mongoose = require('mongoose');
+const { Order, Product, Negotiation, User, Analytics, Payment, LeadContact } = require('../../models');
+const { BadRequestError } = require('../../utils/errors');
+const { ORDER_STATUS, PAYMENT_STATUS, NEGOTIATION_STATUS, PRODUCT_STATUS, USER_ROLES, ANALYTICS_EVENTS } = require('../../utils/constants');
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
@@ -281,9 +283,13 @@ exports.getPotentialCustomers = async (req, res, next) => {
     const minViews = Math.max(parseInt(req.query.minViews, 10) || 1, 1);
     const lastViewedFrom = toDate(req.query.lastViewedFrom);
     const lastViewedTo = toDate(req.query.lastViewedTo);
-    const sortStage = req.query.sort === 'recent'
-      ? { lastViewed: -1, viewCount: -1 }
-      : { viewCount: -1, lastViewed: -1 };
+    // "To contact" (default) or "Contacted": leads the team already messaged.
+    const view = req.query.view === 'contacted' ? 'contacted' : 'todo';
+    const sortStage = view === 'contacted'
+      ? { 'contact.lastContactAt': -1, lastViewed: -1 }
+      : req.query.sort === 'recent'
+        ? { lastViewed: -1, viewCount: -1 }
+        : { viewCount: -1, watchSeconds: -1, lastViewed: -1 };
     // A last-viewed date before the period still finds those views.
     if (lastViewedFrom && lastViewedFrom < startDate) startDate = lastViewedFrom;
 
@@ -294,36 +300,35 @@ exports.getPotentialCustomers = async (req, res, next) => {
       $lte: lastViewedTo && lastViewedTo < latestLeadView ? lastViewedTo : latestLeadView,
       ...(lastViewedFrom && { $gte: lastViewedFrom }),
     };
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const pageLimit = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100);
+    const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * pageLimit;
 
-    // Step 1: Get unique (userId, productId, latestViewTime) for logged-in users
-    // Step 2: Check if same user+product has cart_add or purchase within 6h
-    // Step 3: Keep only those who did NOT convert
     const results = await Analytics.aggregate([
       {
         $match: {
-          eventType: 'view',
+          eventType: { $in: [ANALYTICS_EVENTS.VIEW, ANALYTICS_EVENTS.WATCH] },
           userId: { $ne: null },
           timestamp: { $gte: startDate },
         },
       },
-      // Group by user+product, keep the latest view
+      // One row per person + product: views, latest view and time spent.
       {
         $group: {
           _id: { userId: '$userId', productId: '$productId' },
-          lastViewed: { $max: '$timestamp' },
-          viewCount: { $sum: 1 },
+          viewCount: { $sum: { $cond: [{ $eq: ['$eventType', ANALYTICS_EVENTS.VIEW] }, 1, 0] } },
+          lastViewed: { $max: { $cond: [{ $eq: ['$eventType', ANALYTICS_EVENTS.VIEW] }, '$timestamp', null] } },
+          watchSeconds: { $sum: { $ifNull: ['$watchSeconds', 0] } },
         },
       },
-      // Only views older than the wait (time to add to cart first), within
-      // the chosen last-viewed range and with enough views.
+      // Views older than the wait (time to add to cart first), within the
+      // chosen last-viewed range and with enough views.
       {
         $match: {
           lastViewed: lastViewedMatch,
           viewCount: { $gte: minViews },
         },
       },
-      // Lookup conversion events (cart_add or purchase) for same user+product after the view
+      // Leave out people who added it to the cart or bought it since.
       {
         $lookup: {
           from: 'analytics',
@@ -335,7 +340,7 @@ exports.getPotentialCustomers = async (req, res, next) => {
                   $and: [
                     { $eq: ['$userId', '$$uid'] },
                     { $eq: ['$productId', '$$pid'] },
-                    { $in: ['$eventType', ['cart_add', 'purchase']] },
+                    { $in: ['$eventType', [ANALYTICS_EVENTS.CART_ADD, ANALYTICS_EVENTS.PURCHASE]] },
                     { $gte: ['$timestamp', '$$viewTime'] },
                   ],
                 },
@@ -346,16 +351,43 @@ exports.getPotentialCustomers = async (req, res, next) => {
           as: 'conversions',
         },
       },
-      // Keep only those with NO conversions
       { $match: { conversions: { $size: 0 } } },
-      { $sort: sortStage },
-      // Facet for pagination + count
+      // Messaged by the team within this period: "Contacted".
+      {
+        $lookup: {
+          from: 'leadcontacts',
+          let: { uid: '$_id.userId', pid: '$_id.productId' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$userId', '$$uid'] },
+                    { $eq: ['$productId', '$$pid'] },
+                    { $gte: ['$lastContactAt', startDate] },
+                  ],
+                },
+              },
+            },
+            { $project: { _id: 0, lastContactAt: 1, lastContactByName: 1, contactCount: 1 } },
+          ],
+          as: 'contacts',
+        },
+      },
+      {
+        $addFields: {
+          contact: { $arrayElemAt: ['$contacts', 0] },
+          isContacted: { $gt: [{ $size: '$contacts' }, 0] },
+        },
+      },
       {
         $facet: {
+          counts: [{ $group: { _id: '$isContacted', count: { $sum: 1 } } }],
           data: [
+            { $match: { isContacted: view === 'contacted' } },
+            { $sort: sortStage },
             { $skip: skip },
-            { $limit: parseInt(limit) },
-            // Lookup user info
+            { $limit: pageLimit },
             {
               $lookup: {
                 from: 'users',
@@ -365,7 +397,6 @@ exports.getPotentialCustomers = async (req, res, next) => {
               },
             },
             { $unwind: '$user' },
-            // Lookup product info
             {
               $lookup: {
                 from: 'products',
@@ -382,6 +413,8 @@ exports.getPotentialCustomers = async (req, res, next) => {
                 productId: '$_id.productId',
                 viewCount: 1,
                 lastViewed: 1,
+                watchSeconds: 1,
+                contact: 1,
                 user: { name: 1, email: 1, phone: 1, businessName: '$user.businessInfo.businessName' },
                 product: {
                   name: 1,
@@ -393,26 +426,69 @@ exports.getPotentialCustomers = async (req, res, next) => {
               },
             },
           ],
-          total: [{ $count: 'count' }],
         },
       },
     ]);
 
     const data = results[0]?.data || [];
-    const total = results[0]?.total?.[0]?.count || 0;
+    const counts = { todo: 0, contacted: 0 };
+    for (const row of results[0]?.counts || []) {
+      counts[row._id ? 'contacted' : 'todo'] = row.count;
+    }
+    const total = counts[view];
 
     res.json({
       success: true,
       data: {
         potentialCustomers: data,
+        counts,
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
+          page: Math.max(parseInt(page, 10) || 1, 1),
+          limit: pageLimit,
           total,
-          pages: Math.ceil(total / parseInt(limit)),
+          pages: Math.ceil(total / pageLimit),
         },
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// The team messaged these leads (person + product): they move to "Contacted".
+exports.markLeadsContacted = async (req, res, next) => {
+  try {
+    const leads = (Array.isArray(req.body?.leads) ? req.body.leads : [])
+      .filter((lead) => mongoose.Types.ObjectId.isValid(lead?.userId) && mongoose.Types.ObjectId.isValid(lead?.productId))
+      .slice(0, 200);
+    if (leads.length === 0) throw new BadRequestError('No leads to mark', 'NO_LEADS');
+    const now = new Date();
+    await LeadContact.bulkWrite(leads.map((lead) => ({
+      updateOne: {
+        filter: { userId: lead.userId, productId: lead.productId },
+        update: {
+          $set: { lastContactAt: now, lastContactById: req.user._id, lastContactByName: req.user.name || '' },
+          $setOnInsert: { firstContactAt: now },
+          $inc: { contactCount: 1 },
+        },
+        upsert: true,
+      },
+    })));
+    res.json({ success: true, message: `${leads.length} ${leads.length === 1 ? 'lead' : 'leads'} moved to Contacted`, data: { marked: leads.length } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Undo: the lead goes back to "To contact".
+exports.unmarkLeadContacted = async (req, res, next) => {
+  try {
+    const { userId, productId } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(productId)) {
+      throw new BadRequestError('Invalid lead', 'INVALID_LEAD');
+    }
+    await LeadContact.deleteOne({ userId, productId });
+    res.json({ success: true, message: 'Moved back to To contact' });
   } catch (error) {
     next(error);
   }

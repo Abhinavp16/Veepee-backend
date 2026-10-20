@@ -201,9 +201,15 @@ async function run() {
     await call('POST', `/products/${manual._id}/notify-me`, { token: buyer.token });
     await call('POST', `/products/${manual._id}/notify-me`, { token: wholesaler.token });
 
-    // Manual go-live notifies everyone who asked, once.
+    // The admin sees how many people are waiting.
+    res = await call('GET', `/admin/products/${manual._id}`, { token: admin.token });
+    assert.strictEqual(res.json.data.notifyMeCount, 2);
+
+    // Manual go-live notifies everyone who asked, once, and says how many.
     res = await call('PUT', `/admin/products/${manual._id}`, { token: admin.token, body: { comingSoon: false } });
     assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(res.json.launchNotified, 2);
+    assert.match(res.json.message, /2 customers were notified/);
     const alert = await Notification.findOne({ userId: buyer.user._id, type: 'product_launched' });
     assert.ok(alert, 'subscriber got a launch notification');
     assert.strictEqual(alert.title, 'Now available!');
@@ -213,19 +219,36 @@ async function run() {
     assert.strictEqual(res.status, 200, 'orderable once live');
     await Cart.deleteMany({ userId: buyer.user._id });
 
-    // Date-based go-live: passes the date and has stock => live at once, and the daily sweep records it.
-    const due = await makeProduct({ comingSoon: true, expectedLaunchDate: new Date(Date.now() - 3600000), stock: 10 });
-    const dueNoStock = await makeProduct({ comingSoon: true, expectedLaunchDate: new Date(Date.now() - 3600000), stock: 0 });
+    // Date-based go-live when "go live automatically" is on: live at once once
+    // the date passes (stock or not), and the daily sweep records it.
+    const due = await makeProduct({ comingSoon: true, expectedLaunchDate: new Date(Date.now() - 3600000), autoLaunch: true, stock: 10 });
+    const dueNoStock = await makeProduct({ comingSoon: true, expectedLaunchDate: new Date(Date.now() - 3600000), autoLaunch: true, stock: 0 });
+    const dueManual = await makeProduct({ comingSoon: true, expectedLaunchDate: new Date(Date.now() - 3600000), autoLaunch: false, stock: 10 });
     res = await call('GET', `/products/${due.slug}`);
-    assert.strictEqual(res.json.data.comingSoon, false, 'past launch date with stock is already live');
+    assert.strictEqual(res.json.data.comingSoon, false, 'past launch date is already live');
+    res = await call('GET', `/products/${dueManual.slug}`);
+    assert.strictEqual(res.json.data.comingSoon, true, 'without "go live automatically" it waits for the admin');
     await ProductAlert.create({ userId: buyer.user._id, productId: due._id });
     const swept = await sweepDueLaunches();
-    assert.ok(swept.launched >= 1);
+    assert.ok(swept.launched >= 2);
     assert.strictEqual((await Product.findById(due._id)).comingSoon, false);
-    assert.strictEqual((await Product.findById(dueNoStock._id)).comingSoon, true, 'no stock: stays coming soon');
+    assert.strictEqual((await Product.findById(dueNoStock._id)).comingSoon, false, 'launches without stock too (then sold out)');
+    assert.strictEqual((await Product.findById(dueManual._id)).comingSoon, true, 'manual launch only');
+    // Lists that include coming soon put it after the available products.
+    res = await call('GET', '/products?includeComingSoon=true&limit=50');
+    const flags = res.json.data.map((p) => p.comingSoon);
+    assert.ok(flags.indexOf(true) === -1 || flags.slice(flags.indexOf(true)).every(Boolean), 'coming soon last');
     assert.ok(await Notification.findOne({ userId: buyer.user._id, 'data.productId': String(due._id) }));
     const again = await sweepDueLaunches();
     assert.strictEqual(again.launched, 0, 'a second sweep announces nothing');
+    // Products saved before "go live automatically" existed keep launching by date.
+    const legacy = await makeProduct({ comingSoon: true, expectedLaunchDate: new Date(Date.now() - 3600000) });
+    await Product.updateOne({ _id: legacy._id }, { $unset: { autoLaunch: 1 } });
+    res = await call('GET', `/products/${legacy.slug}`);
+    assert.strictEqual(res.json.data.comingSoon, false, 'old dated product is live');
+    res = await call('GET', `/admin/products/${legacy._id}`, { token: admin.token });
+    assert.strictEqual(res.json.data.autoLaunch, undefined, 'no value saved, so the admin shows it ticked');
+
 
     // --- Pack sizes and minimum quantities -------------------------------------
     const packed = await makeProduct({ packSize: 12, priceUnit: 'packet', minWholesaleQuantity: 2, minCustomerQuantity: 3 });

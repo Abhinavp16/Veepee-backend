@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Product, StockLog, WebsiteSettings, Category } = require('../../models');
+const { Product, StockLog, WebsiteSettings, Category, ProductAlert } = require('../../models');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse, generateSKU } = require('../../utils/helpers');
 const { deleteImage } = require('../../config/cloudinary');
@@ -205,10 +205,12 @@ exports.getProductById = async (req, res, next) => {
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
+    // How many shoppers tapped "Notify me" (shown while it is coming soon).
+    const notifyMeCount = await ProductAlert.countDocuments({ productId: product._id });
 
     res.json({
       success: true,
-      data: product,
+      data: { ...product.toObject(), notifyMeCount },
     });
   } catch (error) {
     next(error);
@@ -321,9 +323,10 @@ exports.updateProduct = async (req, res, next) => {
     await product.save();
 
     // Switching "coming soon" off is the launch: tell everyone who asked.
+    let launchNotified = null;
     if (wasComingSoon && !product.comingSoon && product.status === 'active') {
       try {
-        await notifyLaunchAlerts(product);
+        launchNotified = (await notifyLaunchAlerts(product)).notified;
       } catch (error) {
         console.error('Failed to send launch alerts:', error);
       }
@@ -336,8 +339,11 @@ exports.updateProduct = async (req, res, next) => {
 
     res.json({
       success: true,
-      message: 'Product updated successfully',
+      message: launchNotified === null
+        ? 'Product updated successfully'
+        : `Product launched. ${launchNotified} ${launchNotified === 1 ? 'customer was' : 'customers were'} notified.`,
       data: product,
+      ...(launchNotified !== null && { launchNotified }),
     });
   } catch (error) {
     next(error);

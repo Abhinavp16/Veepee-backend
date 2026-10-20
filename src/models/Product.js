@@ -117,10 +117,13 @@ const productSchema = new mongoose.Schema({
   },
 
   // Coming soon: visible to shoppers but not orderable. It ends when an admin
-  // switches it off, or automatically once `expectedLaunchDate` has passed and
-  // there is stock.
+  // switches it off, or by itself once `expectedLaunchDate` has passed when
+  // `autoLaunch` is on.
   comingSoon: { type: Boolean, default: false },
   expectedLaunchDate: { type: Date, default: null },
+  // No default: products saved before this option existed have no value and
+  // keep going live by date. New products get false from validation.
+  autoLaunch: { type: Boolean },
   hidePriceWhileComingSoon: { type: Boolean, default: false },
 
   sku: {

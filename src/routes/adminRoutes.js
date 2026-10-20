@@ -109,6 +109,8 @@ router.get('/analytics/products', administrator, adminAnalyticsController.getPro
 router.get('/analytics/sales', administrator, adminAnalyticsController.getSalesAnalytics);
 router.get('/analytics/demand', administrator, adminAnalyticsController.getDemandInsights);
 router.get('/analytics/potential-customers', administrator, adminAnalyticsController.getPotentialCustomers);
+router.post('/analytics/potential-customers/contacted', administrator, adminAnalyticsController.markLeadsContacted);
+router.delete('/analytics/potential-customers/contacted', administrator, adminAnalyticsController.unmarkLeadContacted);
 
 router.get('/notifications', operationsStaff, adminNotificationController.listNotifications);
 router.post('/notifications/mark-read', operationsStaff, validate(adminValidation.markNotificationsRead), adminNotificationController.markRead);

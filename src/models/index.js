@@ -21,8 +21,10 @@ const WebsiteSettings = require('./WebsiteSettings');
 const Category = require('./Category');
 const PriceChangeAudit = require('./PriceChangeAudit');
 const AccountDeletionRequest = require('./AccountDeletionRequest');
+const LeadContact = require('./LeadContact');
 
 module.exports = {
+  LeadContact,
   User,
   Product,
   Cart,

@@ -31,6 +31,9 @@ const analyticsSchema = new mongoose.Schema({
     deviceModel: String,
   },
 
+  // For 'watch' events: seconds spent on the product page.
+  watchSeconds: { type: Number, min: 0, default: undefined },
+
   timestamp: {
     type: Date,
     default: Date.now,

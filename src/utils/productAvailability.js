@@ -1,26 +1,32 @@
 const { PRODUCT_STATUS } = require('./constants');
 const { BadRequestError } = require('./errors');
 
-// A coming-soon product goes live by itself once its launch date has passed
-// and it has stock, even before the daily job records the change.
+// A coming-soon product set to go live automatically does so once its launch
+// date has passed, even before the daily job records the change. Products
+// saved before the setting existed (no `autoLaunch`) count as automatic.
 const launchedByDate = (product, now) =>
   Boolean(product.expectedLaunchDate) &&
   new Date(product.expectedLaunchDate) <= now &&
-  Number(product.stock) > 0;
+  product.autoLaunch !== false;
 
 const isComingSoon = (product, now = new Date()) =>
   product.comingSoon === true && !launchedByDate(product, now);
 
 // Mongo filters equivalent to `isComingSoon` / `!isComingSoon`.
+const launchedByDateFilter = (now) => ({
+  expectedLaunchDate: { $lte: now },
+  autoLaunch: { $ne: false },
+});
+
 const comingSoonFilter = (now = new Date()) => ({
   comingSoon: true,
-  $nor: [{ expectedLaunchDate: { $lte: now }, stock: { $gt: 0 } }],
+  $nor: [launchedByDateFilter(now)],
 });
 
 const notComingSoonFilter = (now = new Date()) => ({
   $or: [
     { comingSoon: { $ne: true } },
-    { expectedLaunchDate: { $lte: now }, stock: { $gt: 0 } },
+    launchedByDateFilter(now),
   ],
 });
 

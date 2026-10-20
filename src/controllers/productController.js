@@ -22,7 +22,7 @@ const {
 // Fields every product response needs beyond the raw document: the price the
 // shopper pays, how many they may order, and any coming-soon state.
 const SHOPPER_FIELDS =
-  'packSize priceUnit minCustomerQuantity comingSoon expectedLaunchDate hidePriceWhileComingSoon pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
+  'packSize priceUnit minCustomerQuantity comingSoon expectedLaunchDate autoLaunch hidePriceWhileComingSoon pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
 
 const shopperBlock = (product, role, ctx, now) => {
   const pricing = pricingForUser(product, role, ctx);
@@ -139,6 +139,8 @@ exports.getProducts = async (req, res, next) => {
       const sortOrder = sort.startsWith('-') ? -1 : 1;
       sortOption = { [sortField]: sortOrder, _id: sortOrder };
     }
+    // With coming-soon products included, they come after the available ones.
+    if (isTrue(req.query.includeComingSoon)) sortOption = { comingSoon: 1, ...sortOption };
 
     // Names sort as people read them: "6N70" before "6N200", case ignored.
     const nameSort = Object.prototype.hasOwnProperty.call(sortOption, 'name');
@@ -305,7 +307,7 @@ const loadComingSoonProduct = async (id) => {
     throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
   }
   const product = await Product.findOne({ _id: id, status: PRODUCT_STATUS.ACTIVE })
-    .select('status stock comingSoon expectedLaunchDate')
+    .select('status stock comingSoon expectedLaunchDate autoLaunch')
     .lean();
   if (!product) throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
   return product;
@@ -502,7 +504,9 @@ exports.searchProducts = async (req, res, next) => {
         .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
         .populate('company', 'name')
         .populate(productCategoryPopulate)
-        .sort({ createdAt: -1, _id: -1 })
+        .sort(isTrue(req.query.includeComingSoon)
+          ? { comingSoon: 1, createdAt: -1, _id: -1 }
+          : { createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -594,6 +598,28 @@ exports.trackProductEvent = async (req, res, next) => {
     });
 
     res.json({ success: true, message: 'Event tracked' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Time a signed-in customer spent on a product page; shown on the Leads page.
+// One report covers one stay, capped at 30 minutes.
+const MAX_WATCH_SECONDS_PER_REPORT = 30 * 60;
+exports.trackWatchTime = async (req, res, next) => {
+  try {
+    const seconds = Math.round(Number(req.body?.seconds));
+    if (!mongoose.Types.ObjectId.isValid(req.params.id) || !Number.isFinite(seconds) || seconds < 1) {
+      return res.status(400).json({ success: false, message: 'Invalid watch time' });
+    }
+    await Analytics.create({
+      productId: req.params.id,
+      userId: req.user._id,
+      eventType: ANALYTICS_EVENTS.WATCH,
+      watchSeconds: Math.min(seconds, MAX_WATCH_SECONDS_PER_REPORT),
+      source: 'direct',
+    });
+    res.json({ success: true, message: 'Watch time tracked' });
   } catch (error) {
     next(error);
   }

@@ -15,6 +15,7 @@ router.post('/:id/notify-me', protect, authorize('buyer', 'wholesaler'), product
 router.delete('/:id/notify-me', protect, authorize('buyer', 'wholesaler'), productController.unsubscribeFromLaunch);
 router.post('/:id/view', optionalAuth, productController.trackProductView);
 router.post('/:id/event', optionalAuth, productController.trackProductEvent);
+router.post('/:id/watch-time', protect, authorize('buyer', 'wholesaler'), productController.trackWatchTime);
 router.patch('/:id/hindi-name', protect, authorize('admin'), productController.updateProductNameHindi);
 
 module.exports = router;

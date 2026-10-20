@@ -6,7 +6,7 @@ const { assertPurchasable, isComingSoon } = require('../utils/productAvailabilit
 const { assertQuantityAllowed, quantityRules } = require('../utils/quantityRules');
 
 const CART_PRODUCT_FIELDS =
-  'name nameHindi slug mrp retailPrice wholesalePrice stock images status company categoryIds primaryCategoryId packSize priceUnit minWholesaleQuantity minCustomerQuantity comingSoon expectedLaunchDate pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
+  'name nameHindi slug mrp retailPrice wholesalePrice stock images status company categoryIds primaryCategoryId packSize priceUnit minWholesaleQuantity minCustomerQuantity comingSoon expectedLaunchDate autoLaunch pendingRetailPrice pendingWholesalePrice priceChangeScheduledAt priceChangeEffectiveAt';
 
 // `known` are products already loaded in this request (not loaded again);
 // `ctx` is a discount context already built for every cart product.
@@ -204,7 +204,7 @@ exports.validateCart = async (req, res, next) => {
 
     const productIds = cart.items.map(item => item.productId);
     const products = await Product.find({ _id: { $in: productIds } })
-      .select('name stock retailPrice status comingSoon expectedLaunchDate packSize minWholesaleQuantity minCustomerQuantity')
+      .select('name stock retailPrice status comingSoon expectedLaunchDate autoLaunch packSize minWholesaleQuantity minCustomerQuantity')
       .lean();
     const role = req.user?.role;
     const now = new Date();

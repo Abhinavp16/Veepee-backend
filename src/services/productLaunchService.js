@@ -31,8 +31,8 @@ const notifyLaunchAlerts = async (product) => {
 };
 
 /**
- * Launches every coming-soon product whose date has passed and that has
- * stock. Flipping `comingSoon` is the claim, so overlapping runs cannot
+ * Launches every coming-soon product set to go live automatically whose date
+ * has passed. Flipping `comingSoon` is the claim, so overlapping runs cannot
  * announce the same product twice.
  */
 const sweepDueLaunches = async (now = new Date()) => {
@@ -40,7 +40,7 @@ const sweepDueLaunches = async (now = new Date()) => {
     status: PRODUCT_STATUS.ACTIVE,
     comingSoon: true,
     expectedLaunchDate: { $lte: now },
-    stock: { $gt: 0 },
+    autoLaunch: { $ne: false },
   }).select('_id').lean();
 
   let launched = 0;

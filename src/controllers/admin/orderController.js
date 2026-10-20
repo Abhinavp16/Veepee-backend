@@ -12,9 +12,13 @@ exports.getOrders = async (req, res, next) => {
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
 
     const query = {};
-    if (status) query.status = status;
+    // Only real statuses (a query object here could change the search).
+    if (Object.values(ORDER_STATUS).includes(status)) query.status = status;
     if (['pending', 'confirmed', 'rejected'].includes(req.query.confirmation)) {
       query.confirmationStatus = req.query.confirmation;
+    } else if (req.query.confirmation === 'notPending') {
+      // "Pending payment" means confirmed (or older) orders, ready to pay.
+      query.confirmationStatus = { $ne: 'pending' };
     }
     if (orderType) query.orderType = orderType;
     if (dateFrom || dateTo) {

@@ -109,6 +109,14 @@ async function run() {
     assert.ok(res.json.data.some((o) => String(o._id) === String(orderId)));
     assert.ok(res.json.data.every((o) => o.confirmationStatus === 'pending'));
 
+    // Status filter: only real statuses; "pending payment" leaves out unconfirmed orders.
+    res = await call('GET', '/admin/orders?status=pending_payment&confirmation=notPending&limit=50', { token: staff.token });
+    assert.strictEqual(res.status, 200);
+    assert.ok(!res.json.data.some((o) => String(o._id) === String(orderId)), 'awaiting confirmation is not "pending payment"');
+    assert.ok(res.json.data.every((o) => o.status === 'pending_payment' && o.confirmationStatus !== 'pending'));
+    res = await call('GET', '/admin/orders?status[$ne]=x&limit=50', { token: staff.token });
+    assert.strictEqual(res.status, 200, 'a query object is ignored, not used');
+
     // Confirming needs a valid charge and only works once.
     res = await call('PUT', `/admin/orders/${orderId}/confirm`, { token: staff.token, body: { deliveryCharge: -5 } });
     assert.strictEqual(res.status, 400, 'negative delivery refused');

@@ -26,7 +26,9 @@ const soon = { status: 'active', comingSoon: true, expectedLaunchDate: future, s
 assert.strictEqual(isComingSoon(soon, now), true);
 assert.strictEqual(isComingSoon({ ...soon, expectedLaunchDate: null }, now), true, 'manual go-live has no date');
 assert.strictEqual(isComingSoon({ ...soon, expectedLaunchDate: past }, now), false, 'date passed and stock');
-assert.strictEqual(isComingSoon({ ...soon, expectedLaunchDate: past, stock: 0 }, now), true, 'date passed but no stock');
+assert.strictEqual(isComingSoon({ ...soon, expectedLaunchDate: past, stock: 0 }, now), false, 'date passed launches without stock too');
+assert.strictEqual(isComingSoon({ ...soon, expectedLaunchDate: past, autoLaunch: false }, now), true, 'not set to go live automatically');
+assert.strictEqual(isComingSoon({ ...soon, expectedLaunchDate: past, autoLaunch: true }, now), false);
 assert.strictEqual(isComingSoon({ ...soon, comingSoon: false }, now), false);
 assert.throws(() => assertPurchasable(soon, now), (e) => e.code === 'PRODUCT_COMING_SOON');
 assert.throws(() => assertPurchasable({ ...soon, comingSoon: false, status: 'draft' }, now), (e) => e.code === 'PRODUCT_UNAVAILABLE');

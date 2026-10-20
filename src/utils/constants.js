@@ -67,6 +67,9 @@ module.exports = {
     WISHLIST_ADD: 'wishlist_add',
     NEGOTIATION_START: 'negotiation_start',
     PURCHASE: 'purchase',
+    SHARE: 'share',
+    // Seconds a signed-in customer spent on a product page (Leads).
+    WATCH: 'watch',
   },
 
   ANALYTICS_SOURCES: {

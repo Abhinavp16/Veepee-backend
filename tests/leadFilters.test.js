@@ -37,7 +37,7 @@ async function run() {
   const mongoose = require('mongoose');
   const app = require('../src/app');
   const connectDB = require('../src/config/database');
-  const { User, Product, Analytics } = require('../src/models');
+  const { User, Product, Analytics, LeadContact } = require('../src/models');
 
   await connectDB();
   const server = http.createServer(app).listen(0);
@@ -49,12 +49,22 @@ async function run() {
     const admin = await User.create({ name: 'Leads Admin', phone: randomPhone(), passwordHash: 'secret123', authProvider: 'email', role: 'admin' });
     made.users.push(admin._id);
     const token = jwt.sign({ userId: admin._id }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    let lastCounts = null;
     const get = async (query) => {
       const res = await fetch(`${base}/admin/analytics/potential-customers?limit=100&${query}`, { headers: { Authorization: `Bearer ${token}` } });
       const json = await res.json();
       assert.strictEqual(res.status, 200, JSON.stringify(json));
+      lastCounts = json.data.counts;
       // Only this test's leads (the database may hold others).
       return json.data.potentialCustomers.filter((lead) => lead.product.name?.endsWith(suffix));
+    };
+    const send = async (method, path, body, auth = token) => {
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, json: await res.json().catch(() => ({})) };
     };
 
     const buyers = [];
@@ -74,6 +84,7 @@ async function run() {
       productId: product._id, userId: user._id, eventType: 'view', timestamp: minutesAgo(lastMinutesAgo + i * 10),
     }));
     const [asha, bala, chetan, dev] = buyers;
+    let leads;
     await Analytics.insertMany([
       ...views(asha, 6, 3 * 24 * 60), // 6 views, last 3 days ago
       ...views(bala, 2, 60), // 2 views, last an hour ago
@@ -82,7 +93,7 @@ async function run() {
     ]);
 
     // 1. Leads appear 5 minutes after the last view.
-    let leads = await get('period=7d');
+    leads = await get('period=7d');
     const names = (list) => list.map((lead) => lead.user.name.replace(` ${suffix}`, ''));
     assert.deepStrictEqual(names(leads), ['Asha', 'Chetan', 'Bala'], 'most views first; Dev is too recent');
 
@@ -103,10 +114,46 @@ async function run() {
     // 5. Each lead has the exact last-viewed time.
     assert.ok(!Number.isNaN(new Date(leads[0].lastViewed).getTime()));
 
+    // 6. Watch time: the app reports seconds on the product page; they add up.
+    const ashaToken = jwt.sign({ userId: asha._id }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    let res = await send('POST', `/products/${product._id}/watch-time`, { seconds: 90 }, ashaToken);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    res = await send('POST', `/products/${product._id}/watch-time`, { seconds: 99999 }, ashaToken);
+    assert.strictEqual(res.status, 200, 'capped, not refused');
+    res = await send('POST', `/products/${product._id}/watch-time`, { seconds: 0 }, ashaToken);
+    assert.strictEqual(res.status, 400);
+    res = await send('POST', `/products/${product._id}/watch-time`, { seconds: 30 }, token);
+    assert.strictEqual(res.status, 403, 'only customers report watch time');
+    leads = await get('period=7d');
+    const ashaLead = leads.find((lead) => lead.user.name.startsWith('Asha'));
+    assert.strictEqual(ashaLead.watchSeconds, 90 + 1800, '90s plus one capped 30-minute stay');
+    assert.strictEqual(ashaLead.viewCount, 6, 'watch reports are not views');
+
+    // 7. Contacted: messaging moves a lead out of "To contact"; undo brings it back.
+    res = await send('POST', '/admin/analytics/potential-customers/contacted', {
+      leads: [{ userId: String(bala._id), productId: String(product._id) }],
+    });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    leads = await get('period=7d');
+    assert.deepStrictEqual(names(leads), ['Asha', 'Chetan'], 'Bala left To contact');
+    const todoCount = lastCounts.todo;
+    leads = await get('period=7d&view=contacted');
+    assert.deepStrictEqual(names(leads), ['Bala']);
+    assert.ok(new Date(leads[0].contact.lastContactAt) <= new Date());
+    assert.strictEqual(leads[0].contact.lastContactByName, 'Leads Admin');
+    assert.ok(lastCounts.contacted >= 1 && lastCounts.todo === todoCount);
+    res = await send('DELETE', '/admin/analytics/potential-customers/contacted', { userId: String(bala._id), productId: String(product._id) });
+    assert.strictEqual(res.status, 200);
+    leads = await get('period=7d');
+    assert.deepStrictEqual(names(leads), ['Asha', 'Chetan', 'Bala']);
+    res = await send('POST', '/admin/analytics/potential-customers/contacted', { leads: [] });
+    assert.strictEqual(res.status, 400);
+
     console.log('leadFilters.test.js: all checks passed');
   } finally {
     await Promise.all([
       Analytics.deleteMany({ productId: { $in: made.products } }),
+      LeadContact.deleteMany({ productId: { $in: made.products } }),
       User.deleteMany({ _id: { $in: made.users } }),
       Product.deleteMany({ _id: { $in: made.products } }),
     ]);

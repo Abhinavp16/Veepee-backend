@@ -1,5 +1,6 @@
+const mongoose = require('mongoose');
 const { Order, Cart, Product, Negotiation, Payment, Settings, AffiliateCode, Offer } = require('../models');
-const { NotFoundError, BadRequestError } = require('../utils/errors');
+const { NotFoundError, BadRequestError, ConflictError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { ORDER_CONFIRMATION, ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
 
@@ -355,11 +356,55 @@ exports.getMyOrders = async (req, res, next) => {
   }
 };
 
+// What the app gets back for a placed order (new, or the same one again).
+const orderPlacedResponse = ({ order, settings }) => ({
+  success: true,
+  message: AWAITING_CONFIRMATION_MESSAGE,
+  data: {
+    orderId: order._id,
+    orderNumber: order.orderNumber,
+    subtotal: order.subtotal,
+    deliveryFee: order.deliveryFee,
+    discount: order.discount,
+    total: order.total,
+    status: order.status,
+    confirmationStatus: order.confirmationStatus,
+    nextAction: 'await_confirmation',
+    offerCode: order.offerCode,
+    affiliateCode: order.affiliateCode,
+    discountSource: order.discountSource,
+    upiDetails: {
+      upiId: settings.upiId,
+      displayName: settings.upiDisplayName,
+    },
+  },
+});
+
+/** The Idempotency-Key the app sent for this checkout, if any. */
+const checkoutKey = (req) => {
+  const key = String(req.get('Idempotency-Key') || '').trim();
+  return key && key.length <= 100 ? key : null;
+};
+
+/** Answers with the order already placed for this key, if there is one. */
+const respondWithExistingOrder = async (res, userId, key) => {
+  if (!key) return false;
+  const order = await Order.findOne({ userId, idempotencyKey: key });
+  if (!order) return false;
+  res.status(200).json(orderPlacedResponse({ order, settings: await Settings.getSettings() }));
+  return true;
+};
+
+const isDuplicateKeyError = (error) => error?.code === 11000 && /idempotencyKey/.test(String(error.message));
+
 exports.createOrderFromCart = async (req, res, next) => {
   try {
     const userRole = req.user?.role || 'guest';
     const { items, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
     const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
+    const idempotencyKey = checkoutKey(req);
+    // Same checkout sent again: the same order, nothing new.
+    if (await respondWithExistingOrder(res, req.user._id, idempotencyKey)) return;
 
     // Check if this is a Buy Now request (items provided directly) or cart-based
     let orderItems = [];
@@ -462,33 +507,41 @@ exports.createOrderFromCart = async (req, res, next) => {
     const deliveryFee = 0;
     const total = Math.max(subtotal + deliveryFee - discount, 0);
 
-    const order = await Order.create({
-      userId: req.user._id,
-      customerSnapshot: {
-        name: req.user.name,
-        email: req.user.email,
-        // Some legacy/social-auth users may not have profile phone set.
-        // Fallback to checkout shipping phone to satisfy required snapshot field.
-        phone: req.user.phone || shippingAddress?.phone,
-      },
-      orderType: ORDER_TYPES.RETAIL,
-      items: orderItems,
-      subtotal,
-      deliveryFee,
-      discount,
-      discountSource,
-      affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
-      total,
-      shippingAddress,
-      customerNote,
-      confirmationStatus: ORDER_CONFIRMATION.PENDING,
-      statusHistory: [{
-        status: ORDER_STATUS.PENDING_PAYMENT,
-        note: 'Order placed; awaiting confirmation and delivery charge',
-      }],
-      affiliateCode: resolvedAffiliateCode,
-      offerCode,
-    });
+    let order;
+    try {
+      order = await Order.create({
+        userId: req.user._id,
+        ...(idempotencyKey && { idempotencyKey }),
+        customerSnapshot: {
+          name: req.user.name,
+          email: req.user.email,
+          // Some legacy/social-auth users may not have profile phone set.
+          // Fallback to checkout shipping phone to satisfy required snapshot field.
+          phone: req.user.phone || shippingAddress?.phone,
+        },
+        orderType: ORDER_TYPES.RETAIL,
+        items: orderItems,
+        subtotal,
+        deliveryFee,
+        discount,
+        discountSource,
+        affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
+        total,
+        shippingAddress,
+        customerNote,
+        confirmationStatus: ORDER_CONFIRMATION.PENDING,
+        statusHistory: [{
+          status: ORDER_STATUS.PENDING_PAYMENT,
+          note: 'Order placed; awaiting confirmation and delivery charge',
+        }],
+        affiliateCode: resolvedAffiliateCode,
+        offerCode,
+      });
+    } catch (error) {
+      // The same checkout arrived twice at once and the other one won.
+      if (isDuplicateKeyError(error) && await respondWithExistingOrder(res, req.user._id, idempotencyKey)) return;
+      throw error;
+    }
 
     if (discountSource === 'offer' && offerCode) {
       await Offer.findOneAndUpdate(
@@ -535,28 +588,7 @@ exports.createOrderFromCart = async (req, res, next) => {
       data: { orderId: order._id, orderNumber: order.orderNumber },
     });
 
-    res.status(201).json({
-      success: true,
-      message: AWAITING_CONFIRMATION_MESSAGE,
-      data: {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        subtotal: order.subtotal,
-        deliveryFee: order.deliveryFee,
-        discount: order.discount,
-        total: order.total,
-        status: order.status,
-        confirmationStatus: order.confirmationStatus,
-        nextAction: 'await_confirmation',
-        offerCode: order.offerCode,
-        affiliateCode: order.affiliateCode,
-        discountSource: order.discountSource,
-        upiDetails: {
-          upiId: settings.upiId,
-          displayName: settings.upiDisplayName,
-        },
-      },
-    });
+    res.status(201).json(orderPlacedResponse({ order, settings }));
   } catch (error) {
     next(error);
   }
@@ -566,6 +598,32 @@ exports.createOrderFromCart = async (req, res, next) => {
 // every product of a requirement). Nothing is created unless every line is
 // still orderable.
 const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, customerNote, inputCode }) => {
+  // Claim the negotiations for this order first, in one step: a second tap
+  // (or a retry) finds them taken and places nothing.
+  const orderId = new mongoose.Types.ObjectId();
+  const ids = negotiations.map((n) => n._id);
+  const claim = await Negotiation.updateMany(
+    { _id: { $in: ids }, status: NEGOTIATION_STATUS.ACCEPTED, orderId: null },
+    { $set: { orderId } }
+  );
+  const release = () => Negotiation.updateMany(
+    { _id: { $in: ids }, orderId, status: NEGOTIATION_STATUS.ACCEPTED },
+    { $set: { orderId: null } }
+  );
+  if (claim.modifiedCount !== ids.length) {
+    await release();
+    throw new ConflictError('This order is already being placed', 'ORDER_ALREADY_PLACED');
+  }
+  try {
+    return await createNegotiatedOrder({ orderId, user, negotiations, shippingAddress, customerNote, inputCode });
+  } catch (error) {
+    // Free them again unless the order itself was already created.
+    if (!(await Order.exists({ _id: orderId }))) await release();
+    throw error;
+  }
+};
+
+const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddress, customerNote, inputCode }) => {
   const products = await Product.find({ _id: { $in: negotiations.map((n) => n.productId) } });
   const productById = new Map(products.map((p) => [String(p._id), p]));
 
@@ -605,6 +663,7 @@ const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, custo
   const isGroup = negotiations.length > 1;
 
   const order = await Order.create({
+    _id: orderId,
     userId: user._id,
     customerSnapshot: {
       name: user.name,
@@ -667,29 +726,6 @@ const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, custo
   return { order, settings };
 };
 
-const negotiatedOrderResponse = ({ order, settings }) => ({
-  success: true,
-  message: AWAITING_CONFIRMATION_MESSAGE,
-  data: {
-    orderId: order._id,
-    orderNumber: order.orderNumber,
-    subtotal: order.subtotal,
-    deliveryFee: order.deliveryFee,
-    discount: order.discount,
-    total: order.total,
-    status: order.status,
-    confirmationStatus: order.confirmationStatus,
-    nextAction: 'await_confirmation',
-    offerCode: order.offerCode,
-    affiliateCode: order.affiliateCode,
-    discountSource: order.discountSource,
-    upiDetails: {
-      upiId: settings.upiId,
-      displayName: settings.upiDisplayName,
-    },
-  },
-});
-
 exports.createOrderFromNegotiation = async (req, res, next) => {
   try {
     const { negotiationId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
@@ -698,10 +734,16 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
     const negotiation = await Negotiation.findOne({
       _id: negotiationId,
       wholesalerId: req.user._id,
-      status: NEGOTIATION_STATUS.ACCEPTED,
-      orderId: null,
+      status: { $in: [NEGOTIATION_STATUS.ACCEPTED, NEGOTIATION_STATUS.CONVERTED] },
     });
-    if (!negotiation) {
+    // Already ordered (a second tap, or Back and tap again): that order.
+    if (negotiation?.status === NEGOTIATION_STATUS.CONVERTED && negotiation.orderId) {
+      const existing = await Order.findOne({ _id: negotiation.orderId, userId: req.user._id });
+      if (existing) {
+        return res.status(200).json(orderPlacedResponse({ order: existing, settings: await Settings.getSettings() }));
+      }
+    }
+    if (!negotiation || negotiation.status !== NEGOTIATION_STATUS.ACCEPTED || negotiation.orderId) {
       throw new NotFoundError('Valid negotiation not found', 'NEGOTIATION_NOT_FOUND');
     }
     if (negotiation.requestGroup?.id) {
@@ -709,7 +751,7 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
     }
 
     const placed = await placeNegotiatedOrder({ user: req.user, negotiations: [negotiation], shippingAddress, customerNote, inputCode });
-    res.status(201).json(negotiatedOrderResponse(placed));
+    res.status(201).json(orderPlacedResponse(placed));
   } catch (error) {
     next(error);
   }
@@ -723,13 +765,21 @@ exports.createOrderFromGroup = async (req, res, next) => {
 
     const members = await loadGroup(groupId, { wholesalerId: req.user._id });
     const summary = summarizeGroup(members);
+    // Already ordered (a second tap, or Back and tap again): that order.
+    if (summary.status === NEGOTIATION_STATUS.CONVERTED) {
+      const orderId = members.find((m) => m.status === NEGOTIATION_STATUS.CONVERTED && m.orderId)?.orderId;
+      const existing = orderId && await Order.findOne({ _id: orderId, userId: req.user._id });
+      if (existing) {
+        return res.status(200).json(orderPlacedResponse({ order: existing, settings: await Settings.getSettings() }));
+      }
+    }
     if (!summary.canPay) {
       throw new BadRequestError('Every product in this requirement must be answered before you can pay', 'REQUIREMENT_NOT_PAYABLE');
     }
     const payable = members.filter((m) => m.status === NEGOTIATION_STATUS.ACCEPTED && !m.orderId);
 
     const placed = await placeNegotiatedOrder({ user: req.user, negotiations: payable, shippingAddress, customerNote, inputCode });
-    res.status(201).json(negotiatedOrderResponse(placed));
+    res.status(201).json(orderPlacedResponse(placed));
   } catch (error) {
     next(error);
   }

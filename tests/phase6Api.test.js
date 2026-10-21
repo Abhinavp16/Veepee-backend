@@ -204,8 +204,12 @@ async function run() {
     assert.strictEqual(await Payment.countDocuments({ orderId: order._id }), 1);
     const settled = await Negotiation.find({ 'requestGroup.id': groupId });
     assert.ok(settled.every((n) => n.status === 'converted' && String(n.orderId) === String(order._id)));
+    // Paying again (a second tap, or Back and pay) returns the same order.
     res = await call('POST', '/orders/from-group', { token: wholesaler.token, body: { groupId, shippingAddress: address } });
-    assert.strictEqual(res.status, 400, 'cannot pay twice');
+    assert.strictEqual(res.status, 200, 'paying again gives the same order');
+    assert.strictEqual(String(res.json.data.orderId), String(order._id));
+    assert.strictEqual(await Order.countDocuments({ negotiationIds: { $in: settled.map((n) => n._id) } }), 1, 'still one order');
+    assert.strictEqual(await Payment.countDocuments({ orderId: order._id }), 1);
 
     // --- Declining and partial acceptance --------------------------------------
     await fillCart(wholesaler.user, [[pump, 10], [nozzle, 5]]);

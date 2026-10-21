@@ -87,6 +87,14 @@ const orderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Negotiation',
   }],
+  // Sent by the app once per checkout: a repeated request (double tap, Back
+  // and tap again, retry) gets the same order instead of a second one.
+  idempotencyKey: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+    default: undefined,
+  },
 
   items: [orderItemSchema],
 
@@ -203,6 +211,10 @@ orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ orderType: 1 });
 orderSchema.index({ negotiationId: 1 }, { sparse: true });
+orderSchema.index(
+  { userId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
+);
 orderSchema.index({ 'items.productId': 1 });
 
 orderSchema.pre('save', function (next) {

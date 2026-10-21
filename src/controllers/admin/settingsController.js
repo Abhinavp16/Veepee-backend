@@ -1,12 +1,21 @@
 const { Settings } = require('../../models');
 
+// Leftover Razorpay fields are never sent (the gateway was removed).
+const withoutRazorpay = (settings) => {
+  const data = settings.toObject();
+  delete data.razorpayKeyId;
+  delete data.razorpayKeySecret;
+  delete data.razorpayEnabled;
+  return data;
+};
+
 exports.getSettings = async (req, res, next) => {
   try {
     const settings = await Settings.getSettings();
 
     res.json({
       success: true,
-      data: settings,
+      data: withoutRazorpay(settings),
     });
   } catch (error) {
     next(error);
@@ -38,9 +47,6 @@ exports.updateSettings = async (req, res, next) => {
       'heroBanners',
       'promoBanners',
       'socialLinks',
-      'razorpayKeyId',
-      'razorpayKeySecret',
-      'razorpayEnabled',
       'bankName',
       'bankAccountNumber',
       'bankIfscCode',
@@ -54,15 +60,12 @@ exports.updateSettings = async (req, res, next) => {
       }
     }
 
-    console.log('[Settings Update] razorpayEnabled:', req.body.razorpayEnabled, '| bankTransferEnabled:', req.body.bankTransferEnabled);
-    console.log('[Settings Update] razorpayKeyId present:', !!req.body.razorpayKeyId);
-
     await settings.save();
 
     res.json({
       success: true,
       message: 'Settings updated successfully',
-      data: settings,
+      data: withoutRazorpay(settings),
     });
   } catch (error) {
     next(error);

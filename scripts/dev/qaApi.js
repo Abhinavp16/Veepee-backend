@@ -119,8 +119,7 @@ async function main() {
   r = await call('POST', '/auth/login', { body: { email: 'staff@veepee.dev', password: 'Staff@12345' } });
   check(r.status === 403 && code(r) === 'STAFF_LOGIN_REQUIRED', 'staff are turned away from the admin login');
   r = await call('POST', '/auth/google', { body: { idToken: 'anything-at-all', phone: phone() } });
-  bugIf(r.status === 200 && r.json.data?.accessToken, 'Google login accepts any idToken (no verification)',
-    `returned tokens for ${r.json.data?.user?.email} without verifying the Google token — anyone can log into that account`);
+  check(r.status === 404, 'Google sign-in route is removed', `POST /auth/google → ${r.status}`);
   r = await call('POST', '/auth/send-otp', { body: { phone: newPhone } });
   bugIf(r.status === 200, 'send-otp is a stub', 'reports "OTP sent" but nothing is sent');
   r = await call('POST', '/auth/verify-phone', { body: { phone: newPhone, otp: '123456' } });
@@ -342,8 +341,8 @@ async function main() {
   r = await call('GET', `/admin/orders/${cartOrderId}`, { token: admin });
   check(r.status === 200, 'admin order detail');
   section = 'razorpay';
-  r = await call('GET', '/razorpay/key');
-  record('INFO', 'Razorpay not configured in dev', `GET /razorpay/key → ${r.status}. The verify endpoint trusts the orderId in the body (code review: razorpayController.js) — not executable without keys`);
+  r = await call('POST', '/razorpay/verify', { token: buyer, body: { orderId: cartOrderId } });
+  check(r.status === 404, 'Razorpay routes are removed', `POST /razorpay/verify → ${r.status}`);
 
   // ---------------------------------------------------------------- negotiations
   section = 'negotiations';
@@ -468,7 +467,7 @@ async function main() {
   r = await call('PUT', '/admin/settings', { token: admin, body: { businessName: 'QA Biz', razorpayKeyId: 'rzp_test_x' } });
   const s = await db.Settings.findById('app_settings').lean();
   check(r.status === 200 && s.businessName === 'QA Biz', 'save settings');
-  bugIf(s.razorpayKeyId !== 'rzp_test_x', 'Razorpay keys cannot be saved from settings', 'the fields are listed in the controller but stripped by validation');
+  check(!s.razorpayKeyId, 'Razorpay keys are not saved (the gateway was removed)');
   await db.Settings.updateOne({ _id: 'app_settings' }, { $set: { businessName: 'VeepeeImpex (Dev)' } });
   r = await call('POST', '/admin/staff', { token: admin, body: { name: 'QA Staff', email: `qa${Date.now()}@veepee.dev`, password: 'TempPass123' } });
   check(r.status === 201, 'create staff');

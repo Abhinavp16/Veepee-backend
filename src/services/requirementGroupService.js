@@ -57,7 +57,7 @@ const createRequirementFromCart = async ({ user, message, offers = [] }) => {
 
   const products = await Product.find({ _id: { $in: cart.items.map((i) => i.productId) } });
   const byId = new Map(products.map((p) => [String(p._id), p]));
-  const ctx = await loadDiscountContext(products);
+  const ctx = await loadDiscountContext(products, { sales: false }); // never sale prices
   const offerFor = new Map(offers.map((o) => [String(o.productId), o.pricePerUnit]));
 
   const lines = [];

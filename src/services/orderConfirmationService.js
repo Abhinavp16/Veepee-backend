@@ -128,6 +128,8 @@ async function rejectOrder({ orderId, reason, actorId }) {
   order.confirmationNote = reason;
   order.addStatusHistory(ORDER_STATUS.CANCELLED, `Order not confirmed: ${reason}`, actorId);
   await order.save();
+  // Not confirmed: its sale units (and the buyer's per-person share) go back.
+  await require('./saleService').giveBackSaleUnits(order.items, { userId: order.userId });
   await Payment.updateMany(
     { orderId: order._id, status: PAYMENT_STATUS.PENDING },
     { $set: { status: PAYMENT_STATUS.REJECTED, rejectionReason: reason } }

@@ -4,7 +4,60 @@ const { NotFoundError, BadRequestError, ConflictError } = require('../utils/erro
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { ORDER_CONFIRMATION, ORDER_STATUS, ORDER_TYPES, NEGOTIATION_STATUS, USER_ROLES } = require('../utils/constants');
 
-const { loadDiscountContext, priceFor } = require('../services/productPricingService');
+const { loadDiscountContext, priceFor, applySaleLimits } = require('../services/productPricingService');
+const {
+  takeSaleUnits,
+  giveBackSaleUnits,
+  SALE_SOLD_OUT,
+  SALE_LIMIT_REACHED,
+} = require('../services/saleService');
+
+// Why a line lost its sale price (see productPricingService.applySaleLimits).
+const SALE_NOTE_REASONS = { limit: 'sale_limit', sold_out: 'sale_sold_out' };
+
+/**
+ * Lines whose price is not what the buyer was looking at (a sale ended or
+ * sold out, the buyer reached a sale's limit, a price update came in).
+ * Lines the app didn't send are skipped, so older app versions still work.
+ */
+function changedPrices(orderItems, expectedPrices, saleNotes = new Map()) {
+  if (!Array.isArray(expectedPrices) || expectedPrices.length === 0) return [];
+  const expected = new Map(expectedPrices.map((entry) => [String(entry.productId), Number(entry.price)]));
+  return orderItems.flatMap((item) => {
+    const was = expected.get(String(item.productId));
+    if (was === undefined || Math.abs(was - item.pricePerUnit) < 0.01) return [];
+    const reason = SALE_NOTE_REASONS[saleNotes.get(String(item.productId))?.reason];
+    return [{
+      productId: String(item.productId),
+      name: item.productSnapshot?.name || '',
+      expected: was,
+      price: item.pricePerUnit,
+      ...(reason ? { reason } : {}),
+    }];
+  });
+}
+
+function pricesChangedError(changed) {
+  const list = changed.map((line) => `${line.name} is now ₹${line.price}`).join('; ');
+  const error = new ConflictError(`Prices changed: ${list}. Check and place the order again.`, 'PRICE_CHANGED');
+  error.details = { items: changed };
+  return error;
+}
+
+// Coupons cover the part of the order not already on sale.
+const couponSubtotalOf = (items) => items
+  .filter((item) => !item.saleId)
+  .reduce((sum, item) => sum + item.totalPrice, 0);
+
+function assertCouponUsable(inputCode, items) {
+  if (!inputCode) return;
+  if (items.length > 0 && items.every((item) => item.saleId)) {
+    throw new BadRequestError(
+      'Coupons don\'t apply to sale prices. Remove the coupon, or add items that aren\'t on sale.',
+      'COUPON_SALE_ITEMS',
+    );
+  }
+}
 const { assertPurchasable } = require('../utils/productAvailability');
 const { isReceiptAvailable, sendOrderReceipt } = require('../utils/orderReceiptPdf');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
@@ -207,27 +260,62 @@ const getCurrentCartPricing = async (userId, userRole) => {
   const productIds = cart.items.map(item => item.productId);
   const products = await Product.find({ _id: { $in: productIds } })
     .select('mrp retailPrice wholesalePrice company categoryIds primaryCategoryId');
-  const ctx = await loadDiscountContext(products);
+  const ctx = await loadDiscountContext(products, { sales: 'fresh' });
   const productMap = products.reduce((acc, p) => {
     acc[p._id.toString()] = p;
     return acc;
   }, {});
 
-  let subtotal = 0;
-  let itemCount = 0;
+  const lines = cart.items
+    .map((item) => ({ product: productMap[item.productId.toString()], quantity: item.quantity }))
+    .filter((line) => line.product);
+  await applySaleLimits(ctx, lines, userRole, userId);
 
-  for (const item of cart.items) {
-    const product = productMap[item.productId.toString()];
-    if (!product) continue;
-    subtotal += priceFor(product, userRole, ctx).price * item.quantity;
-    itemCount += item.quantity;
+  let subtotal = 0;
+  let couponSubtotal = 0;
+  let itemCount = 0;
+  let saleLines = 0;
+
+  for (const { product, quantity } of lines) {
+    const priced = priceFor(product, userRole, ctx);
+    subtotal += priced.price * quantity;
+    if (priced.sale) saleLines += 1;
+    else couponSubtotal += priced.price * quantity;
+    itemCount += quantity;
   }
 
   if (subtotal <= 0 || itemCount <= 0) {
     throw new BadRequestError('No valid items in cart', 'CART_EMPTY');
   }
 
-  return { subtotal, itemCount };
+  return { subtotal, couponSubtotal, itemCount, onlySaleItems: saleLines > 0 && saleLines === lines.length };
+};
+
+// The same for Buy Now items sent with the coupon preview.
+const getItemsPricing = async (items, userRole, userId) => {
+  const products = await Product.find({ _id: { $in: items.map((i) => i.productId) } })
+    .select('mrp retailPrice wholesalePrice company categoryIds primaryCategoryId');
+  const ctx = await loadDiscountContext(products, { sales: 'fresh' });
+  const byId = new Map(products.map((p) => [String(p._id), p]));
+  const lines = items
+    .map((item) => ({ product: byId.get(String(item.productId)), quantity: item.quantity }))
+    .filter((line) => line.product);
+  await applySaleLimits(ctx, lines, userRole, userId);
+  let subtotal = 0;
+  let couponSubtotal = 0;
+  let saleLines = 0;
+  for (const { product, quantity } of lines) {
+    const priced = priceFor(product, userRole, ctx);
+    subtotal += priced.price * quantity;
+    if (priced.sale) saleLines += 1;
+    else couponSubtotal += priced.price * quantity;
+  }
+  return {
+    subtotal,
+    couponSubtotal,
+    itemCount: lines.reduce((sum, l) => sum + l.quantity, 0),
+    onlySaleItems: saleLines > 0 && saleLines === lines.length,
+  };
 };
 
 const AWAITING_CONFIRMATION_MESSAGE =
@@ -235,21 +323,29 @@ const AWAITING_CONFIRMATION_MESSAGE =
 
 exports.previewCouponForCart = async (req, res, next) => {
   try {
-    const { couponCode, subtotal: requestedSubtotal } = req.body;
+    const { couponCode, subtotal: requestedSubtotal, items } = req.body;
 
-    // If subtotal is provided in request (Buy Now flow), use it; otherwise get from cart
+    // Buy Now sends its items (or, from older apps, a subtotal); otherwise
+    // the cart is used. The coupon covers only the part not on sale.
     let subtotal = 0;
+    let couponSubtotal = 0;
     let itemCount = 0;
+    let onlySaleItems = false;
 
-    if (requestedSubtotal !== undefined && requestedSubtotal !== null) {
-      // Buy Now flow - use provided subtotal
+    if (Array.isArray(items) && items.length > 0) {
+      ({ subtotal, couponSubtotal, itemCount, onlySaleItems } = await getItemsPricing(items, req.user.role, req.user._id));
+    } else if (requestedSubtotal !== undefined && requestedSubtotal !== null) {
       subtotal = parseFloat(requestedSubtotal);
+      couponSubtotal = subtotal;
       itemCount = 1;
     } else {
-      // Cart flow - get from cart
-      const cartPricing = await getCurrentCartPricing(req.user._id, req.user.role);
-      subtotal = cartPricing.subtotal;
-      itemCount = cartPricing.itemCount;
+      ({ subtotal, couponSubtotal, itemCount, onlySaleItems } = await getCurrentCartPricing(req.user._id, req.user.role));
+    }
+    if (onlySaleItems) {
+      throw new BadRequestError(
+        'Coupons don\'t apply to sale prices. Remove the coupon, or add items that aren\'t on sale.',
+        'COUPON_SALE_ITEMS',
+      );
     }
 
     const {
@@ -260,7 +356,7 @@ exports.previewCouponForCart = async (req, res, next) => {
       discount,
     } = await resolveCouponDiscount({
       couponCode,
-      subtotal,
+      subtotal: couponSubtotal,
       userRole: req.user.role,
     });
 
@@ -279,6 +375,8 @@ exports.previewCouponForCart = async (req, res, next) => {
         affiliatePersonName: affiliateMeta?.personName || null,
         itemCount,
         subtotal,
+        // The part of the subtotal the coupon applies to (not on sale).
+        couponSubtotal,
         deliveryFee,
         totalBeforeDiscount,
         discount,
@@ -425,7 +523,7 @@ exports.createOrderFromCart = async (req, res, next) => {
     }
 
     const products = await Product.find({ _id: { $in: productIds } });
-    const ctx = await loadDiscountContext(products);
+    const ctx = await loadDiscountContext(products, { sales: 'fresh' });
     const productMap = products.reduce((acc, p) => {
       acc[p._id.toString()] = p;
       return acc;
@@ -435,6 +533,16 @@ exports.createOrderFromCart = async (req, res, next) => {
     const itemsToProcess = (items && Array.isArray(items) && items.length > 0)
       ? items
       : cart.items;
+
+    // A sale price covers a whole line or the line pays the normal price.
+    const saleNotes = await applySaleLimits(
+      ctx,
+      itemsToProcess
+        .map((item) => ({ product: productMap[item.productId.toString()], quantity: item.quantity }))
+        .filter((line) => line.product),
+      userRole,
+      req.user._id,
+    );
 
     // Pre-check: collect all stock issues before creating order
     const stockIssues = [];
@@ -461,8 +569,9 @@ exports.createOrderFromCart = async (req, res, next) => {
         continue;
       }
 
-      // Get role-based pricing
-      const pricePerUnit = priceFor(product, userRole, ctx).price;
+      // Get role-based pricing (a live sale's price when it is lower)
+      const priced = priceFor(product, userRole, ctx);
+      const pricePerUnit = priced.price;
       const itemTotal = pricePerUnit * item.quantity;
 
       orderItems.push({
@@ -475,6 +584,8 @@ exports.createOrderFromCart = async (req, res, next) => {
         quantity: item.quantity,
         pricePerUnit: pricePerUnit,
         totalPrice: itemTotal,
+        saleId: priced.sale?.id || null,
+        salePercent: priced.sale?.percent ?? null,
       });
       subtotal += itemTotal;
     }
@@ -493,6 +604,11 @@ exports.createOrderFromCart = async (req, res, next) => {
       throw new BadRequestError('No valid items in cart', 'CART_EMPTY');
     }
 
+    // Stop if a price is not what the buyer saw, so they can look again.
+    const changed = changedPrices(orderItems, req.body.expectedPrices, saleNotes);
+    if (changed.length > 0) throw pricesChangedError(changed);
+
+    assertCouponUsable(inputCode, orderItems);
     const {
       discountSource,
       offerCode,
@@ -500,12 +616,33 @@ exports.createOrderFromCart = async (req, res, next) => {
       discount,
     } = await resolveCouponDiscount({
       couponCode: inputCode,
-      subtotal,
+      subtotal: couponSubtotalOf(orderItems),
       userRole: req.user.role,
     });
     // Delivery is added by the shop when it confirms the order.
     const deliveryFee = 0;
     const total = Math.max(subtotal + deliveryFee - discount, 0);
+
+    // Sale-priced lines: claim this buyer's share and the units, all or
+    // nothing. If another order got there first, say which price changed.
+    try {
+      await takeSaleUnits(orderItems, { userId: req.user._id });
+    } catch (error) {
+      if (![SALE_SOLD_OUT, SALE_LIMIT_REACHED].includes(error.code)) throw error;
+      const line = orderItems.find((item) => String(item.productId) === error.details?.productId);
+      const normal = line ? priceFor(productMap[String(line.productId)], userRole, {
+        ...ctx,
+        withoutSale: new Set([...ctx.withoutSale, String(line.productId)]),
+      }).price : null;
+      if (!line || normal == null) throw error;
+      throw pricesChangedError([{
+        productId: String(line.productId),
+        name: line.productSnapshot?.name || '',
+        expected: line.pricePerUnit,
+        price: normal,
+        reason: error.code === SALE_LIMIT_REACHED ? 'sale_limit' : 'sale_sold_out',
+      }]);
+    }
 
     let order;
     try {
@@ -538,6 +675,8 @@ exports.createOrderFromCart = async (req, res, next) => {
         offerCode,
       });
     } catch (error) {
+      // Not recorded: the sale units go back.
+      await giveBackSaleUnits(orderItems, { userId: req.user._id });
       // The same checkout arrived twice at once and the other one won.
       if (isDuplicateKeyError(error) && await respondWithExistingOrder(res, req.user._id, idempotencyKey)) return;
       throw error;

@@ -50,6 +50,18 @@ router.get('/price-change-history', administrator, priceManagementController.get
 router.get('/price-management/config', administrator, priceManagementController.getPriceManagementConfig);
 router.get('/price-management/categories', administrator, priceManagementController.getCategories);
 
+// Sale pages: Staff may look; changing or announcing a sale is Administrator-only.
+const adminSaleController = require('../controllers/admin/saleController');
+router.get('/sales', operationsStaff, adminSaleController.getSales);
+router.post('/sales', administrator, validate(adminValidation.createSale), adminSaleController.createSale);
+router.post('/sales/preview', administrator, validate(adminValidation.previewSale), adminSaleController.previewSale);
+router.get('/sales/:id', operationsStaff, adminSaleController.getSale);
+router.put('/sales/:id', administrator, validate(adminValidation.updateSale), adminSaleController.updateSale);
+router.delete('/sales/:id', administrator, adminSaleController.deleteSale);
+router.post('/sales/:id/end', administrator, adminSaleController.endSale);
+router.get('/sales/:id/announce', administrator, adminSaleController.getAnnouncePreview);
+router.post('/sales/:id/announce', administrator, adminSaleController.announceSale);
+
 // Catalogue reads are the only product capability granted to Staff.
 router.get('/products', operationsStaff, adminProductController.getProducts);
 router.get('/products/:id', operationsStaff, adminProductController.getProductById);

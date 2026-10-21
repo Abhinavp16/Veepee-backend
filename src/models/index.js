@@ -22,8 +22,12 @@ const Category = require('./Category');
 const PriceChangeAudit = require('./PriceChangeAudit');
 const AccountDeletionRequest = require('./AccountDeletionRequest');
 const LeadContact = require('./LeadContact');
+const Sale = require('./Sale');
+const SaleClaim = require('./SaleClaim');
 
 module.exports = {
+  Sale,
+  SaleClaim,
   LeadContact,
   User,
   Product,

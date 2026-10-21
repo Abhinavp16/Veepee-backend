@@ -259,6 +259,11 @@ const orderValidation = {
       pincode: Joi.string().required().max(10),
     }).required(),
     customerNote: Joi.string().max(500).allow('', null),
+    // The unit prices the buyer was looking at (stops the order if one changed).
+    expectedPrices: Joi.array().max(200).items(Joi.object({
+      productId: Joi.string().required(),
+      price: Joi.number().min(0).required(),
+    })),
     couponCode: Joi.string().trim().uppercase().allow('', null),
     affiliateCode: Joi.string().trim().uppercase().allow('', null),
   }),
@@ -266,6 +271,11 @@ const orderValidation = {
   previewCoupon: Joi.object({
     couponCode: Joi.string().trim().uppercase().required(),
     subtotal: Joi.number().min(0),
+    // Buy Now: the item, so sale prices are left out of the coupon.
+    items: Joi.array().max(50).items(Joi.object({
+      productId: Joi.string().required(),
+      quantity: Joi.number().integer().min(1).required(),
+    })),
   }),
 
   createFromGroup: Joi.object({
@@ -301,7 +311,39 @@ const orderValidation = {
   }),
 };
 
+// Sale pages (Diwali Sale, Stock Clearance, ...).
+const salePercent = Joi.number().integer().min(1).max(90).allow(null);
+const saleBody = Joi.object({
+  name: Joi.string().trim().min(2).max(80).required(),
+  nameHindi: Joi.string().trim().max(80).allow(''),
+  subtitle: Joi.string().trim().max(140).allow(''),
+  subtitleHindi: Joi.string().trim().max(140).allow(''),
+  theme: Joi.string().valid('diwali', 'clearance', 'flash', 'kisan').required(),
+  heroImageUrl: Joi.string().trim().max(1000).allow(''),
+  audience: Joi.string().valid('customers', 'wholesalers', 'both').required(),
+  customerPercent: salePercent,
+  wholesalerPercent: salePercent,
+  startsAt: Joi.date().required(),
+  endsAt: Joi.date().greater(Joi.ref('startsAt')).required()
+    .messages({ 'date.greater': 'The end must be after the start' }),
+  status: Joi.string().valid('draft', 'published').required(),
+  products: Joi.array().max(200).items(Joi.object({
+    productId: Joi.string().hex().length(24).required(),
+    customerPercent: salePercent,
+    wholesalerPercent: salePercent,
+    saleQuantity: Joi.number().integer().min(1).max(1000000).allow(null),
+    perPersonLimit: Joi.number().integer().min(1).max(100000).allow(null),
+  })).unique('productId').required(),
+});
+
 const adminValidation = {
+  createSale: saleBody,
+  updateSale: saleBody,
+  // The editor's unsaved form (a name may not be typed yet).
+  previewSale: saleBody.keys({
+    name: Joi.string().trim().max(80).allow(''),
+    saleId: Joi.string().hex().length(24).allow(null, ''),
+  }),
   createProduct: Joi.object({
     name: Joi.string().required().max(200),
     description: Joi.string().required(),

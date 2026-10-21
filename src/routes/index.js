@@ -222,16 +222,19 @@ router.get('/settings/mobile-app', async (req, res, next) => {
   }
 });
 
-router.get('/settings/banners', async (req, res, next) => {
+router.get('/settings/banners', require('../middlewares/auth').optionalAuth, async (req, res, next) => {
   try {
     const { Settings } = require('../models');
+    // Sale banners only while their sale is live, and only for its audience.
+    const { withoutUnavailableSaleBanners } = require('../services/saleService');
+    const role = req.user?.role === 'wholesaler' ? 'wholesaler' : 'buyer';
     const settings = await Settings.getSettings();
-    const heroBanners = (settings.heroBanners || [])
+    const heroBanners = await withoutUnavailableSaleBanners((settings.heroBanners || [])
       .filter(b => b.isActive !== false)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
-    const promoBanners = (settings.promoBanners || [])
+      .sort((a, b) => (a.order || 0) - (b.order || 0)), role);
+    const promoBanners = await withoutUnavailableSaleBanners((settings.promoBanners || [])
       .filter(b => b.isActive !== false)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
+      .sort((a, b) => (a.order || 0) - (b.order || 0)), role);
     const whatsapp = settings.socialLinks?.whatsapp || settings.businessPhone || '';
     res.json({ success: true, data: { heroBanners, promoBanners, whatsapp } });
   } catch (error) {
@@ -340,6 +343,7 @@ router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/admin', adminRoutes);
 router.use('/companies', companyRoutes);
+router.use('/sales', require('./saleRoutes'));
 router.use('/categories', categoryRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/notifications', notificationRoutes);

@@ -65,6 +65,31 @@ const categoryResponse = (product) => ({
   primaryCategory: product.primaryCategoryId || null,
 });
 
+// The product fields and populates a product card needs.
+const CARD_SELECT = `name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew company ${SHOPPER_FIELDS}`;
+
+/** A product as it appears in lists (cards), priced for this shopper. */
+const productCard = (p, userRole, ctx, now = new Date()) => ({
+  id: p._id,
+  name: p.name,
+  nameHindi: p.nameHindi,
+  slug: p.slug,
+  shortDescription: p.shortDescription,
+  category: p.category,
+  ...categoryResponse(p),
+  brand: p.brand || p.company?.name || '',
+  ...shopperBlock(p, userRole, ctx, now),
+  stock: p.stock,
+  inStock: p.stock > 0,
+  primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
+  isFeatured: p.isFeatured,
+  isHot: p.isHot,
+  isNew: p.isNew,
+});
+
+exports.productCard = productCard;
+exports.CARD_SELECT = CARD_SELECT;
+
 exports.getProducts = async (req, res, next) => {
   try {
     const {
@@ -159,26 +184,7 @@ exports.getProducts = async (req, res, next) => {
 
     const ctx = await loadDiscountContext(products);
     const now = new Date();
-    const formattedProducts = products.map(p => {
-      const pricing = shopperBlock(p, userRole, ctx, now);
-      return {
-        id: p._id,
-        name: p.name,
-        nameHindi: p.nameHindi,
-        slug: p.slug,
-        shortDescription: p.shortDescription,
-        category: p.category,
-        ...categoryResponse(p),
-        brand: p.brand || p.company?.name || '',
-        ...pricing,
-        stock: p.stock,
-        inStock: p.stock > 0,
-        primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
-        isFeatured: p.isFeatured,
-        isHot: p.isHot,
-        isNew: p.isNew,
-      };
-    });
+    const formattedProducts = products.map((p) => productCard(p, userRole, ctx, now));
 
     res.json({
       success: true,

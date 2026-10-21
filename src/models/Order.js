@@ -26,6 +26,18 @@ const orderItemSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  // Set when this line was priced by a sale: its units count towards the
+  // sale's quantity and the buyer's "max per person", and come back if the
+  // order is cancelled or not confirmed.
+  saleId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Sale',
+    default: null,
+  },
+  salePercent: {
+    type: Number,
+    default: null,
+  },
 }, { _id: false });
 
 const statusHistorySchema = new mongoose.Schema({
@@ -206,6 +218,10 @@ const orderSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+orderSchema.index(
+  { 'items.saleId': 1, userId: 1 },
+  { partialFilterExpression: { 'items.saleId': { $type: 'objectId' } } }
+);
 orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });

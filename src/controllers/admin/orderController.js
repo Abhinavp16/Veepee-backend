@@ -5,6 +5,7 @@ const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { ORDER_STATUS } = require('../../utils/constants');
 const notificationService = require('../../services/notificationService');
 const orderConfirmationService = require('../../services/orderConfirmationService');
+const { giveBackSaleUnits } = require('../../services/saleService');
 
 exports.getOrders = async (req, res, next) => {
   try {
@@ -176,6 +177,11 @@ exports.updateOrderStatus = async (req, res, next) => {
     }
 
     await order.save();
+
+    // A cancelled order's sale units (and the buyer's per-person share) go back.
+    if (status === ORDER_STATUS.CANCELLED) {
+      await giveBackSaleUnits(order.items, { userId: order.userId });
+    }
 
     try {
       await notificationService.sendOrderStatusUpdate(order.userId, order._id, order.status);

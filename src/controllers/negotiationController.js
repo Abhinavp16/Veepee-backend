@@ -72,7 +72,7 @@ exports.createNegotiation = async (req, res, next) => {
       throw new BadRequestError('Negotiation is not enabled for this product', 'NEGOTIATION_DISABLED');
     }
     assertQuantityAllowed(product, quantity, USER_ROLES.WHOLESALER);
-    const ctx = await loadDiscountContext([product]);
+    const ctx = await loadDiscountContext([product], { sales: false }); // never sale prices
 
     const settings = await Settings.getSettings();
     const expiresAt = new Date();

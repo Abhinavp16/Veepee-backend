@@ -41,6 +41,18 @@ const TEMPLATES = {
     en: { title: 'Order Update', body: 'Your order status has been updated to {status}' },
     hi: { title: 'ऑर्डर अपडेट', body: 'आपके ऑर्डर की स्थिति बदलकर {status} हो गई है' },
   },
+  saleOrderReleased: {
+    en: { title: 'Order cancelled', body: 'Order {orderNumber} was not paid within {hours} hours, so its sale prices were released. You can order again.' },
+    hi: { title: 'ऑर्डर रद्द हुआ', body: 'ऑर्डर {orderNumber} का भुगतान {hours} घंटे में नहीं हुआ, इसलिए उसकी सेल कीमतें छोड़ दी गईं। आप फिर से ऑर्डर कर सकते हैं।' },
+  },
+  saleLive: {
+    en: { title: '{saleName} is live!', body: 'Up to {percent}% off. Tap to see the sale before it ends.' },
+    hi: { title: '{saleName} शुरू हो गई!', body: '{percent}% तक की छूट। सेल ख़त्म होने से पहले देखें।' },
+  },
+  saleLiveNoPercent: {
+    en: { title: '{saleName} is live!', body: 'Special prices for a short time. Tap to see the sale.' },
+    hi: { title: '{saleName} शुरू हो गई!', body: 'कुछ समय के लिए ख़ास कीमतें। सेल देखने के लिए टैप करें।' },
+  },
   priceChanged: {
     en: { title: 'Price Updated', body: '{productName} is now ₹{retailPrice}.' },
     hi: { title: 'कीमत बदली', body: '{productName} अब ₹{retailPrice} का है।' },

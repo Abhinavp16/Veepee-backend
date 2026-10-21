@@ -1,7 +1,7 @@
 const { Cart, Product } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 
-const { loadDiscountContext, priceFor, pendingPriceNotice } = require('../services/productPricingService');
+const { loadDiscountContext, priceFor, pendingPriceNotice, applySaleLimits } = require('../services/productPricingService');
 const { assertPurchasable, isComingSoon } = require('../utils/productAvailability');
 const { assertQuantityAllowed, quantityRules } = require('../utils/quantityRules');
 
@@ -17,13 +17,24 @@ const populateCartItems = async (cart, userRole = 'guest', { known = [], ctx: gi
     ? await Product.find({ _id: { $in: missingIds } }).select(CART_PRODUCT_FIELDS).lean()
     : [];
   const products = [...known, ...fetched];
-  const ctx = givenCtx || await loadDiscountContext(products);
+  const ctx = givenCtx || await loadDiscountContext(products, { sales: 'fresh' });
   const now = new Date();
 
   const productMap = products.reduce((acc, p) => {
     acc[p._id.toString()] = p;
     return acc;
   }, {});
+
+  // A line the sale can't cover (units used up, or over the buyer's limit)
+  // shows the normal price, with a note saying why.
+  const saleNotes = await applySaleLimits(
+    ctx,
+    cart.items
+      .map((item) => ({ product: productMap[item.productId.toString()], quantity: item.quantity }))
+      .filter((line) => line.product),
+    userRole,
+    cart.userId,
+  );
 
   const items = cart.items.map(item => {
     const product = productMap[item.productId.toString()];
@@ -53,6 +64,8 @@ const populateCartItems = async (cart, userRole = 'guest', { known = [], ctx: gi
         // Present in the cart but not orderable right now.
         unavailable: product.status !== 'active' || isComingSoon(product, now),
         pendingPriceChange: pendingPriceNotice(product, userRole, own, now),
+        sale: own.sale || null,
+        saleNote: saleNotes.get(item.productId.toString()) || null,
       },
       quantity: item.quantity,
       priceAtAdd: item.priceAtAdd,
@@ -117,7 +130,7 @@ exports.addItem = async (req, res, next) => {
       ? await Product.find({ _id: { $in: others } }).select(CART_PRODUCT_FIELDS).lean()
       : [];
     const known = [product, ...otherProducts];
-    const ctx = await loadDiscountContext(known);
+    const ctx = await loadDiscountContext(known, { sales: 'fresh' });
     const priceToUse = priceFor(product, userRole, ctx).price;
 
     cart.addItem(productId, quantity, priceToUse);

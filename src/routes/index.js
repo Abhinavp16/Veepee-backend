@@ -35,7 +35,17 @@ const getPrimaryWebsiteProductImage = (product = {}) => {
   return primary?.url || '';
 };
 
-const mapLiveProductToWebsiteProduct = (product, fallback = {}, order = 0) => {
+// The website's sale badge: the customer sale price and the sale, only while
+// a sale for customers is live on this product.
+const websiteSaleFields = (product, ctx) => {
+  const { priceFor } = require('../services/productPricingService');
+  const own = ctx ? priceFor(product, 'buyer', ctx) : null;
+  if (!own?.sale) return {};
+  const { id, name, theme, percent, endsAt } = own.sale;
+  return { salePrice: own.price, sale: { id: String(id), name, theme, percent, endsAt } };
+};
+
+const mapLiveProductToWebsiteProduct = (product, fallback = {}, order = 0, ctx = null) => {
   const images = Array.isArray(product?.images)
     ? product.images
         .map((image) => String(image?.url || '').trim())
@@ -59,6 +69,7 @@ const mapLiveProductToWebsiteProduct = (product, fallback = {}, order = 0) => {
     image,
     images: images.length > 0 ? images : (image ? [image] : []),
     order,
+    ...websiteSaleFields(product, ctx),
   };
 };
 
@@ -267,9 +278,13 @@ router.get('/settings/website-content', async (req, res, next) => {
           _id: { $in: linkedProductIds },
           status: PRODUCT_STATUS.ACTIVE,
         })
-          .select('name slug category shortDescription description sku mrp retailPrice wholesalePrice stock status images')
+          .select('name slug category shortDescription description sku mrp retailPrice wholesalePrice stock status images company primaryCategoryId categoryIds')
           .lean()
       : [];
+    const { loadDiscountContext } = require('../services/productPricingService');
+    const pricingCtx = linkedProducts.length > 0
+      ? await loadDiscountContext(linkedProducts, { sales: 'cached' })
+      : null;
     const linkedProductsById = new Map(linkedProducts.map((product) => [String(product._id), product]));
 
     const productCategories = rawProductCategories.map((category, categoryIndex) => {
@@ -288,7 +303,7 @@ router.get('/settings/website-content', async (req, res, next) => {
             if (!liveProduct) {
               return null;
             }
-            return mapLiveProductToWebsiteProduct(liveProduct, detail, detailIndex);
+            return mapLiveProductToWebsiteProduct(liveProduct, detail, detailIndex, pricingCtx);
           }
 
           const storedProduct = mapStoredWebsiteProduct(detail, detailIndex);

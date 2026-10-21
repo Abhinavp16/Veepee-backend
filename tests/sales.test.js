@@ -137,6 +137,28 @@ async function run() {
     assert.strictEqual(listed.price, 800, 'lists show the sale price too');
     console.log('2. live sale: customer/wholesaler %, own %, never dearer, guests, lists, price requests at normal price');
 
+    // 2b. The website's category products carry the sale (badge and price), only where it's cheaper.
+    await M.WebsiteSettings.updateOne(
+      { _id: 'website_settings' },
+      { $set: { productCategories: [{ name: `Pumps ${suffix}`, isActive: true, order: 0, products: [], productDetails: [
+        { productId: String(pump._id), order: 0 },
+        { productId: String(nozzle._id), order: 1 },
+        { productId: String(hoe._id), order: 2 },
+      ] }] } },
+      { upsert: true },
+    );
+    res = await call('GET', '/settings/website-content');
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    const websiteProducts = res.json.data.productCategories[0].productDetails;
+    const onWebsite = (product) => websiteProducts.find((p) => p.productId === String(product._id));
+    assert.strictEqual(onWebsite(pump).salePrice, 800, 'website: the customer sale price');
+    assert.strictEqual(onWebsite(pump).sale.percent, 20);
+    assert.strictEqual(onWebsite(pump).sale.name, saleBody.name);
+    assert.strictEqual(onWebsite(pump).retailPrice, 900, 'the normal price stays as it was');
+    assert.strictEqual(onWebsite(nozzle).sale, undefined, 'no badge where the sale isn\'t cheaper');
+    assert.strictEqual(onWebsite(hoe).sale, undefined, 'no badge outside the sale');
+    console.log('2b. website category products: sale price and badge only where the sale applies');
+
     // 3. Public sale pages.
     res = await call('GET', '/sales/live', buyer.token);
     assert.strictEqual(res.json.data.length, 1);

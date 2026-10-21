@@ -220,6 +220,16 @@ async function run() {
     assert.deepStrictEqual(personNames(list), ['Bala']);
     assert.ok(new Date(list[0].lastContactAt) <= new Date());
 
+    // 11. Coming-soon products are not leads (they can't be bought yet).
+    const soon = await Product.create({
+      name: `Lead Soon ${suffix}`, category: 'pumps', mrp: 900, retailPrice: 700, wholesalePrice: 600,
+      sku: `LEADSOON-${suffix}`, stock: 0, status: 'active', comingSoon: true,
+    });
+    made.products.push(soon._id);
+    await Analytics.insertMany([10, 20, 30].map((m) => ({ productId: soon._id, userId: asha._id, eventType: 'view', timestamp: minutesAgo(m) })));
+    leads = await get('period=7d');
+    assert.ok(!leads.some((lead) => lead.product.name === `Lead Soon ${suffix}`), 'coming soon is not a lead');
+
     console.log('leadFilters.test.js: all checks passed');
   } finally {
     await Promise.all([

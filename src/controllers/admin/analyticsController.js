@@ -491,6 +491,8 @@ exports.getPotentialCustomers = async (req, res, next) => {
           localField: '_id.productId',
           foreignField: '_id',
           pipeline: [
+            // Coming-soon products can't be bought yet: not leads.
+            { $match: { comingSoon: { $ne: true } } },
             {
               $project: {
                 _id: 0,

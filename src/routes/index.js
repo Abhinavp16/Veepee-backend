@@ -350,7 +350,13 @@ router.get('/offers', async (req, res, next) => {
     const { Offer } = require('../models');
     const { targetGroup } = req.query;
 
-    const query = { isActive: true };
+    // Same date rule as checkout: not started yet or already ended means not listed.
+    const now = new Date();
+    const query = {
+      isActive: true,
+      startDate: { $lte: now },
+      $or: [{ endDate: null }, { endDate: { $exists: false } }, { endDate: { $gte: now } }],
+    };
     if (targetGroup) {
       query.targetGroup = { $in: [targetGroup, 'all'] };
     }

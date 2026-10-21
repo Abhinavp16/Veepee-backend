@@ -341,9 +341,10 @@ const adminValidation = {
     isFeatured: Joi.boolean().default(false),
     isHot: Joi.boolean().default(false),
     labelIds: Joi.array().items(Joi.string()),
-    rating: Joi.number().min(0).max(5).default(4.5),
-    purchaseCountMin: Joi.number().integer().min(0).default(0),
-    purchaseCountMax: Joi.number().integer().min(0).default(0),
+    // Retired fields, still accepted from older admin pages.
+    rating: Joi.number().min(0).max(5),
+    purchaseCountMin: Joi.number().integer().min(0),
+    purchaseCountMax: Joi.number().integer().min(0),
     company: Joi.string().allow('', null),
     videoUrl: Joi.string().allow('', null),
     shippingTerms: Joi.string().allow('', null),

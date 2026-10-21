@@ -146,7 +146,7 @@ exports.getProducts = async (req, res, next) => {
     const nameSort = Object.prototype.hasOwnProperty.call(sortOption, 'name');
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
+        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew company ${SHOPPER_FIELDS}`)
         .populate('company', 'name')
         .populate(productCategoryPopulate)
         .collation(nameSort ? { locale: 'en', strength: 2, numericOrdering: true } : undefined)
@@ -177,9 +177,6 @@ exports.getProducts = async (req, res, next) => {
         isFeatured: p.isFeatured,
         isHot: p.isHot,
         isNew: p.isNew,
-        rating: p.rating,
-        purchaseCountMin: p.purchaseCountMin,
-        purchaseCountMax: p.purchaseCountMax,
       };
     });
 
@@ -256,8 +253,11 @@ exports.getProductBySlug = async (req, res, next) => {
         .filter(Boolean);
     }
 
+    // Not shown to shoppers: there are no product reviews yet, and the
+    // "live purchases" range was made-up social proof.
+    const { rating, purchaseCountMin, purchaseCountMax, ...shownProduct } = product;
     const responseData = {
-      ...product,
+      ...shownProduct,
       id: product._id,
       // Keep `company` as a plain id (unchanged contract) and expose the brand name separately.
       company: product.company?._id || null,
@@ -382,7 +382,7 @@ exports.getFeaturedProducts = async (req, res, next) => {
       isFeatured: true,
       ...notComingSoonFilter(new Date()),
     })
-      .select(`name slug shortDescription category categoryIds primaryCategoryId mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
+      .select(`name slug shortDescription category categoryIds primaryCategoryId mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew company ${SHOPPER_FIELDS}`)
       .populate(productCategoryPopulate)
       .sort({ createdAt: -1, _id: -1 })
       .limit(10)
@@ -405,9 +405,6 @@ exports.getFeaturedProducts = async (req, res, next) => {
         primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
         isHot: p.isHot,
         isNew: p.isNew,
-        rating: p.rating,
-        purchaseCountMin: p.purchaseCountMin,
-        purchaseCountMax: p.purchaseCountMax,
       };
     });
 
@@ -501,7 +498,7 @@ exports.searchProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew rating purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
+        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew company ${SHOPPER_FIELDS}`)
         .populate('company', 'name')
         .populate(productCategoryPopulate)
         .sort(isTrue(req.query.includeComingSoon)
@@ -532,9 +529,6 @@ exports.searchProducts = async (req, res, next) => {
         primaryImage: p.images?.find(img => img.isPrimary)?.url || p.images?.[0]?.url,
         isHot: p.isHot,
         isNew: p.isNew,
-        rating: p.rating,
-        purchaseCountMin: p.purchaseCountMin,
-        purchaseCountMax: p.purchaseCountMax,
       };
     });
 
@@ -701,7 +695,7 @@ exports.getRelatedProducts = async (req, res, next) => {
       $and: [relatedCategoryCondition, notComingSoonFilter(new Date())],
       _id: { $ne: currentProduct._id }
     })
-      .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images rating isFeatured isHot isNew purchaseCountMin purchaseCountMax company ${SHOPPER_FIELDS}`)
+      .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew company ${SHOPPER_FIELDS}`)
       .populate('company', 'name')
       .populate(productCategoryPopulate)
       .sort({ isFeatured: -1, createdAt: -1, _id: -1 })
@@ -728,9 +722,6 @@ exports.getRelatedProducts = async (req, res, next) => {
         isFeatured: p.isFeatured,
         isHot: p.isHot,
         isNew: p.isNew,
-        rating: p.rating,
-        purchaseCountMin: p.purchaseCountMin,
-        purchaseCountMax: p.purchaseCountMax,
       };
     });
 

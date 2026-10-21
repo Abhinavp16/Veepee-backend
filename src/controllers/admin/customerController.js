@@ -3,10 +3,12 @@ const notificationService = require('../../services/notificationService');
 const mongoose = require('mongoose');
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
-const { USER_ROLES } = require('../../utils/constants');
+const { USER_ROLES, PAID_ORDER_STATUSES } = require('../../utils/constants');
 
 const customerRoles = [USER_ROLES.BUYER, USER_ROLES.WHOLESALER];
-const customerQuery = { role: { $in: customerRoles } };
+// Deleted accounts are not customers any more (see Deletion Requests).
+const customerQuery = { role: { $in: customerRoles }, deletedAt: null };
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 exports.getCustomers = async (req, res, next) => {
   try {
@@ -16,11 +18,13 @@ exports.getCustomers = async (req, res, next) => {
     const query = { ...customerQuery };
     if (customerRoles.includes(role)) query.role = role;
     if (search) {
+      // Typed text is matched as text ("+91" or "(" no longer break it).
+      const pattern = new RegExp(escapeRegex(search), 'i');
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { 'businessInfo.businessName': { $regex: search, $options: 'i' } },
+        { name: pattern },
+        { email: pattern },
+        { phone: pattern },
+        { 'businessInfo.businessName': pattern },
       ];
     }
 
@@ -45,7 +49,8 @@ exports.getCustomers = async (req, res, next) => {
 
 exports.getCustomerById = async (req, res, next) => {
   try {
-    const customer = await User.findOne({ _id: req.params.id, ...customerQuery }).select('-fcmTokens');
+    // Plain object: spread below, a Mongoose document would lose its fields.
+    const customer = await User.findOne({ _id: req.params.id, ...customerQuery }).select('-fcmTokens').lean();
 
     if (!customer) {
       throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
@@ -58,7 +63,8 @@ exports.getCustomerById = async (req, res, next) => {
           $group: {
             _id: null,
             totalOrders: { $sum: 1 },
-            totalSpent: { $sum: '$total' },
+            // Only money actually received (payment verified onwards).
+            totalSpent: { $sum: { $cond: [{ $in: ['$status', PAID_ORDER_STATUSES] }, '$total', 0] } },
           },
         },
       ]),
@@ -83,7 +89,7 @@ exports.getCustomerById = async (req, res, next) => {
       data: {
         ...customer,
         stats: {
-          orders: orderStats[0] || { totalOrders: 0, totalSpent: 0 },
+          orders: orderStats[0] ? { totalOrders: orderStats[0].totalOrders, totalSpent: orderStats[0].totalSpent } : { totalOrders: 0, totalSpent: 0 },
           negotiations: negotiationStats.reduce((acc, n) => {
             acc[n._id] = n.count;
             return acc;

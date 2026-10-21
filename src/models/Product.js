@@ -216,12 +216,13 @@ const productSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  // Retired: not shown to shoppers (no product reviews yet).
   rating: {
     type: Number,
-    default: 4.5,
     min: [0, 'Rating cannot be less than 0'],
     max: [5, 'Rating cannot exceed 5'],
   },
+  // Retired: the made-up "live purchases" range is no longer shown.
   purchaseCountMin: {
     type: Number,
     default: 0,
@@ -265,14 +266,17 @@ productSchema.virtual('isLowStock').get(function () {
   return this.stock > 0 && this.stock <= this.lowStockThreshold;
 });
 
+// Images may not be loaded (a query that selects only some fields).
 productSchema.virtual('primaryImage').get(function () {
-  const primary = this.images.find(img => img.isPrimary);
-  return primary ? primary.url : (this.images[0]?.url || null);
+  const images = this.images || [];
+  const primary = images.find(img => img.isPrimary);
+  return primary ? primary.url : (images[0]?.url || null);
 });
 
 productSchema.virtual('primaryBlurHash').get(function () {
-  const primary = this.images.find(img => img.isPrimary);
-  return primary ? primary.blurHash : (this.images[0]?.blurHash || null);
+  const images = this.images || [];
+  const primary = images.find(img => img.isPrimary);
+  return primary ? primary.blurHash : (images[0]?.blurHash || null);
 });
 
 productSchema.virtual('categories').get(function () {

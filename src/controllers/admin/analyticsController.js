@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const { Order, Product, Negotiation, User, Analytics, Payment, LeadContact } = require('../../models');
 const { BadRequestError } = require('../../utils/errors');
-const { ORDER_STATUS, PAYMENT_STATUS, NEGOTIATION_STATUS, PRODUCT_STATUS, USER_ROLES, ANALYTICS_EVENTS } = require('../../utils/constants');
+const { ORDER_STATUS, PAYMENT_STATUS, NEGOTIATION_STATUS, PRODUCT_STATUS, USER_ROLES, ANALYTICS_EVENTS, PAID_ORDER_STATUSES } = require('../../utils/constants');
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
@@ -26,43 +26,50 @@ exports.getDashboardStats = async (req, res, next) => {
       Order.countDocuments(),
       Payment.countDocuments({ status: PAYMENT_STATUS.PENDING }),
       Order.aggregate([
-        { $match: { status: { $in: [ORDER_STATUS.PAYMENT_VERIFIED, ORDER_STATUS.PROCESSING, ORDER_STATUS.SHIPPED, ORDER_STATUS.DELIVERED] } } },
+        { $match: { status: { $in: PAID_ORDER_STATUSES } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Negotiation.countDocuments({ status: { $in: [NEGOTIATION_STATUS.PENDING, NEGOTIATION_STATUS.COUNTERED] } }),
       Order.countDocuments({ createdAt: { $gte: today } }),
+      // Paid revenue from today's orders (not orders still awaiting payment).
       Order.aggregate([
-        { $match: { createdAt: { $gte: today }, status: { $ne: ORDER_STATUS.CANCELLED } } },
+        { $match: { createdAt: { $gte: today }, status: { $in: PAID_ORDER_STATUSES } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Order.countDocuments({ createdAt: { $gte: thisMonthStart } }),
       Order.aggregate([
-        { $match: { createdAt: { $gte: thisMonthStart }, status: { $ne: ORDER_STATUS.CANCELLED } } },
+        { $match: { createdAt: { $gte: thisMonthStart }, status: { $in: PAID_ORDER_STATUSES } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Product.countDocuments({ status: PRODUCT_STATUS.ACTIVE, $expr: { $lte: ['$stock', '$lowStockThreshold'] }, stock: { $gt: 0 } }),
       Product.countDocuments({ status: PRODUCT_STATUS.ACTIVE }),
-      User.countDocuments({ role: { $in: [USER_ROLES.BUYER, USER_ROLES.WHOLESALER] }, isActive: true }),
+      // Same rule as the Customers page: every account that isn't deleted.
+      User.countDocuments({ role: { $in: [USER_ROLES.BUYER, USER_ROLES.WHOLESALER] }, deletedAt: null }),
     ]);
+
+    // Staff don't see money figures (Analytics is admin-only too).
+    const showRevenue = req.user.role === USER_ROLES.ADMIN;
+    const money = (rows) => (showRevenue ? rows[0]?.total || 0 : null);
 
     res.json({
       success: true,
       data: {
+        showRevenue,
         overview: {
           totalOrders,
           pendingPayments,
-          totalRevenue: totalRevenue[0]?.total || 0,
+          totalRevenue: money(totalRevenue),
           activeNegotiations,
           totalProducts,
           totalCustomers,
         },
         today: {
           orders: todayOrders,
-          revenue: todayRevenue[0]?.total || 0,
+          revenue: money(todayRevenue),
         },
         thisMonth: {
           orders: monthOrders,
-          revenue: monthRevenue[0]?.total || 0,
+          revenue: money(monthRevenue),
         },
         alerts: {
           lowStockProducts,
@@ -78,7 +85,7 @@ exports.getProductAnalytics = async (req, res, next) => {
   try {
     const { period = '30d', sortBy = 'views' } = req.query;
 
-    const daysMap = { '7d': 7, '30d': 30, '90d': 90 };
+    const daysMap = { '7d': 7, '30d': 30, '90d': 90, '1y': 365 };
     const days = daysMap[period] || 30;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
@@ -177,12 +184,7 @@ exports.getSalesAnalytics = async (req, res, next) => {
     const startDate = days ? new Date() : null;
     if (startDate) startDate.setDate(startDate.getDate() - days);
 
-    const salesStatuses = [
-      ORDER_STATUS.PAYMENT_VERIFIED,
-      ORDER_STATUS.PROCESSING,
-      ORDER_STATUS.SHIPPED,
-      ORDER_STATUS.DELIVERED,
-    ];
+    const salesStatuses = PAID_ORDER_STATUSES;
     const salesMatch = {
       status: { $in: salesStatuses },
       ...(startDate ? { createdAt: { $gte: startDate } } : {}),
@@ -233,7 +235,9 @@ exports.getSalesAnalytics = async (req, res, next) => {
             revenue: { $sum: '$items.totalPrice' },
           },
         },
-        { $project: { category: '$_id', orders: 1, revenue: 1, _id: 0 } },
+        // Show the category's name, not its slug.
+        { $lookup: { from: 'categories', localField: '_id', foreignField: 'slug', pipeline: [{ $project: { name: 1 } }], as: 'categoryDoc' } },
+        { $project: { category: { $ifNull: [{ $arrayElemAt: ['$categoryDoc.name', 0] }, '$_id'] }, orders: 1, revenue: 1, _id: 0 } },
         { $sort: { revenue: -1 } },
       ]),
     ]);
@@ -246,6 +250,31 @@ exports.getSalesAnalytics = async (req, res, next) => {
     const retailOrders = orderTypeCounts.find(o => o._id === 'retail')?.count || 0;
     const wholesaleOrders = orderTypeCounts.find(o => o._id === 'wholesale')?.count || 0;
 
+    // Change vs the same length of time just before (none for "all time").
+    let revenueChangePercent = null;
+    if (startDate) {
+      const previousStart = new Date(startDate.getTime() - days * 86400000);
+      const [previous] = await Order.aggregate([
+        { $match: { status: { $in: salesStatuses }, createdAt: { $gte: previousStart, $lt: startDate } } },
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]);
+      const previousRevenue = previous?.total || 0;
+      const currentRevenue = summary[0]?.totalRevenue || 0;
+      if (previousRevenue > 0) {
+        revenueChangePercent = Math.round(((currentRevenue - previousRevenue) / previousRevenue) * 1000) / 10;
+      }
+    }
+
+    // Paid orders per 100 product views in the same period.
+    const productViews = await Analytics.countDocuments({
+      eventType: ANALYTICS_EVENTS.VIEW,
+      ...(startDate ? { timestamp: { $gte: startDate } } : {}),
+    });
+    const totalOrdersInPeriod = summary[0]?.totalOrders || 0;
+    const conversionRate = productViews > 0
+      ? Math.round((totalOrdersInPeriod / productViews) * 1000) / 10
+      : null;
+
     res.json({
       success: true,
       data: {
@@ -255,6 +284,9 @@ exports.getSalesAnalytics = async (req, res, next) => {
           averageOrderValue: Math.round(summary[0]?.avgOrderValue || 0),
           retailOrders,
           wholesaleOrders,
+          revenueChangePercent,
+          conversionRate,
+          productViews,
         },
         timeline,
         byCategory,
@@ -755,7 +787,8 @@ exports.getDemandInsights = async (req, res, next) => {
       $expr: { $lte: ['$stock', '$lowStockThreshold'] },
     })
       .select('name sku stock lowStockThreshold')
-      .limit(10);
+      .limit(10)
+      .lean();
 
     const trendingProducts = await Analytics.aggregate([
       { $match: { timestamp: { $gte: sevenDaysAgo }, eventType: 'view' } },

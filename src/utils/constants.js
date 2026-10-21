@@ -27,6 +27,9 @@ module.exports = {
     CANCELLED: 'cancelled',
   },
 
+  // Orders whose payment the team has verified (money actually received).
+  PAID_ORDER_STATUSES: ['payment_verified', 'processing', 'shipped', 'delivered'],
+
   // New orders wait for the shop to confirm them and add the delivery charge.
   ORDER_CONFIRMATION: {
     PENDING: 'pending',

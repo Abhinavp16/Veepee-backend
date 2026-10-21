@@ -116,11 +116,17 @@ settingsSchema.statics.getSettings = async function () {
   let settings = await this.findById('app_settings');
   
   if (!settings) {
-    settings = await this.create({
-      _id: 'app_settings',
-      upiId: process.env.DEFAULT_UPI_ID || 'veepeeimpex@ybl',
-      upiDisplayName: process.env.DEFAULT_UPI_NAME || 'VeepeeImpex Payments',
-    });
+    try {
+      settings = await this.create({
+        _id: 'app_settings',
+        upiId: process.env.DEFAULT_UPI_ID || 'veepeeimpex@ybl',
+        upiDisplayName: process.env.DEFAULT_UPI_NAME || 'VeepeeImpex Payments',
+      });
+    } catch (error) {
+      // Another request created it at the same moment: use that one.
+      if (error?.code !== 11000) throw error;
+      settings = await this.findById('app_settings');
+    }
   }
   
   return settings;

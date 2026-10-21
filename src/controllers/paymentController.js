@@ -47,7 +47,9 @@ exports.uploadScreenshot = async (req, res, next) => {
       throw new NotFoundError('Payment record not found', 'PAYMENT_NOT_FOUND');
     }
 
-    if (payment.screenshotUrl) {
+    // A rejected screenshot can be replaced; any other one waits for the team.
+    const isRetry = payment.status === PAYMENT_STATUS.REJECTED;
+    if (payment.screenshotUrl && !isRetry) {
       throw new BadRequestError('Screenshot already uploaded', 'SCREENSHOT_ALREADY_UPLOADED');
     }
 
@@ -84,19 +86,48 @@ exports.uploadScreenshot = async (req, res, next) => {
     await fileUpload.makePublic();
     const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`;
 
-    payment.screenshotUrl = publicUrl;
-    payment.screenshotPublicId = filename;
-    payment.uploadedAt = new Date();
-    payment.status = PAYMENT_STATUS.PENDING;
-    await payment.save();
+    // Only if nothing changed meanwhile (a second upload or the team acting).
+    const updated = await Payment.findOneAndUpdate(
+      { _id: payment._id, status: payment.status, screenshotUrl: payment.screenshotUrl },
+      {
+        $set: {
+          screenshotUrl: publicUrl,
+          screenshotPublicId: filename,
+          uploadedAt: new Date(),
+          status: PAYMENT_STATUS.PENDING,
+          ...(isRetry && { rejectionReason: null, verifiedBy: null, verifiedAt: null }),
+        },
+        ...(isRetry && {
+          $push: {
+            previousAttempts: {
+              screenshotUrl: payment.screenshotUrl,
+              screenshotPublicId: payment.screenshotPublicId,
+              uploadedAt: payment.uploadedAt,
+              rejectionReason: payment.rejectionReason,
+              rejectedAt: payment.verifiedAt,
+              rejectedBy: payment.verifiedBy,
+            },
+          },
+        }),
+      },
+      { new: true }
+    );
+    if (!updated) {
+      throw new BadRequestError('Screenshot already uploaded', 'SCREENSHOT_ALREADY_UPLOADED');
+    }
 
-    order.addStatusHistory(ORDER_STATUS.PAYMENT_UPLOADED, 'Payment screenshot uploaded');
+    order.addStatusHistory(
+      ORDER_STATUS.PAYMENT_UPLOADED,
+      isRetry ? 'New payment screenshot uploaded after rejection' : 'Payment screenshot uploaded'
+    );
     await order.save();
 
     notifyTeam({
       type: 'payment_uploaded',
       title: 'Payment to verify',
-      body: `${order.customerSnapshot?.name || 'A customer'} uploaded a payment screenshot for order ${order.orderNumber}.`,
+      body: isRetry
+        ? `${order.customerSnapshot?.name || 'A customer'} uploaded a new payment screenshot for order ${order.orderNumber} (the last one was rejected).`
+        : `${order.customerSnapshot?.name || 'A customer'} uploaded a payment screenshot for order ${order.orderNumber}.`,
       link: '/orders',
       data: { orderId: order._id, orderNumber: order.orderNumber },
     });
@@ -105,9 +136,9 @@ exports.uploadScreenshot = async (req, res, next) => {
       success: true,
       message: 'Payment screenshot uploaded. Awaiting verification.',
       data: {
-        paymentId: payment._id,
-        status: payment.status,
-        uploadedAt: payment.uploadedAt,
+        paymentId: updated._id,
+        status: updated.status,
+        uploadedAt: updated.uploadedAt,
       },
     });
   } catch (error) {

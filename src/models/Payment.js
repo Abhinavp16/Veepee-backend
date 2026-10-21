@@ -80,6 +80,24 @@ const paymentSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // Screenshots rejected before the current one (newest last), so the team
+  // can see what was sent before.
+  previousAttempts: {
+    type: [
+      new mongoose.Schema(
+        {
+          screenshotUrl: String,
+          screenshotPublicId: String,
+          uploadedAt: Date,
+          rejectionReason: String,
+          rejectedAt: Date,
+          rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        },
+        { _id: false }
+      ),
+    ],
+    default: [],
+  },
 }, {
   timestamps: true,
 });

@@ -281,6 +281,9 @@ exports.updateProduct = async (req, res, next) => {
       ? product.categoryIds.map(String)
       : [product.category].filter(Boolean);
     const updateData = { ...req.body };
+    // Stock changes only through PUT /:id/stock (logged, and safe while orders
+    // come in). A form opened earlier would otherwise undo sales since then.
+    delete updateData.stock;
     const wasComingSoon = product.comingSoon === true;
 
     const assignment = await resolveCategoryAssignment(updateData, product);

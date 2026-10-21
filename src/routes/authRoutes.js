@@ -19,7 +19,6 @@ router.post('/register-phone/wholesaler', authLimiter, validate(authValidation.r
 router.post('/login', authLimiter, validate(authValidation.login), authController.login);
 router.post('/staff-login', authLimiter, validate(authValidation.staffLogin), authController.staffLogin);
 router.post('/login-phone', authLimiter, validate(authValidation.loginPhone), authController.loginWithPhone);
-router.post('/google', authLimiter, validate(authValidation.googleAuth), authController.googleAuth);
 router.post('/send-otp', authLimiter, validate(authValidation.sendOtp), authController.sendOtp);
 router.post('/verify-phone', authLimiter, validate(authValidation.verifyPhone), authController.verifyPhone);
 router.post('/refresh-token', validate(authValidation.refreshToken), authController.refreshToken);

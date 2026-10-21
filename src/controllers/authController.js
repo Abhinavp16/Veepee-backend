@@ -359,58 +359,6 @@ exports.registerWholesalerWithPhone = async (req, res, next) => {
   }
 };
 
-exports.googleAuth = async (req, res, next) => {
-  try {
-    const { idToken, phone, marketingConsent } = req.body;
-
-    // TODO: Verify Google ID token with Firebase Admin SDK
-    // For now, this is a placeholder
-    const decodedToken = { uid: 'google_uid', email: 'user@gmail.com', name: 'Google User' };
-
-    let user = await User.findOne({ googleId: decodedToken.uid });
-
-    if (!user) {
-      user = await User.findOne({ email: decodedToken.email });
-
-      if (user) {
-        user.googleId = decodedToken.uid;
-        user.authProvider = AUTH_PROVIDERS.GOOGLE;
-        await user.save();
-      } else {
-        user = await User.create({
-          name: decodedToken.name,
-          email: decodedToken.email,
-          phone,
-          googleId: decodedToken.uid,
-          authProvider: AUTH_PROVIDERS.GOOGLE,
-          role: USER_ROLES.BUYER,
-          marketingConsent,
-          consentTimestamp: marketingConsent ? new Date() : null,
-        });
-      }
-    }
-
-    if (!user.isActive) {
-      throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
-    }
-
-    user.lastLoginAt = new Date();
-    await user.save();
-
-    const tokens = await generateTokens(user._id, req.headers['user-agent']);
-
-    res.json({
-      success: true,
-      data: {
-        user: sanitizeUser(user),
-        ...tokens,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.sendOtp = async (req, res, next) => {
   try {
     const { phone } = req.body;

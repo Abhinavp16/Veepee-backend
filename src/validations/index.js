@@ -122,12 +122,6 @@ const authValidation = {
     language: Joi.string().valid('en', 'hi').required(),
   }),
 
-  googleAuth: Joi.object({
-    idToken: Joi.string().required(),
-    phone: indianPhone.required(),
-    marketingConsent: Joi.boolean().default(false),
-  }),
-
   sendOtp: Joi.object({
     phone: indianPhone.required(),
   }),

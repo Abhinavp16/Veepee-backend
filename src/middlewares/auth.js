@@ -22,7 +22,7 @@ const protect = async (req, res, next) => {
     if (decoded.type === 'refresh') {
       throw new UnauthorizedError('Invalid token', 'INVALID_TOKEN');
     }
-    // Sessions with a hard end (staff) stop working at that moment.
+    // Sessions with a hard end (admin and staff) stop working at that moment.
     if (decoded.sx && Date.now() / 1000 >= decoded.sx) {
       throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
     }

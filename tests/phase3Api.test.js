@@ -61,10 +61,35 @@ async function run() {
   try {
     const admin = await User.create({ name: 'P3 Admin', email: adminEmail, passwordHash: 'adminpass123', authProvider: 'email', role: 'admin' });
     made.users.push(admin._id);
+    const adminBefore = Date.now();
     let res = await call('POST', '/auth/login', { body: { email: adminEmail, password: 'adminpass123' } });
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.json.data.sessionExpiresAt, undefined, 'admin sessions are not capped');
+    const adminEnd = new Date(res.json.data.sessionExpiresAt).getTime();
+    assert.ok(Math.abs(adminEnd - (adminBefore + 5 * 3600 * 1000)) < 5000, 'admin sessions last 5 hours');
+    assert.ok(jwt.decode(res.json.data.refreshToken).exp * 1000 <= adminEnd, 'admin refresh token ends with the session');
     const adminToken = res.json.data.accessToken;
+    res = await call('POST', '/auth/refresh-token', { body: { refreshToken: res.json.data.refreshToken } });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(Math.floor(new Date(res.json.data.sessionExpiresAt).getTime() / 1000), Math.floor(adminEnd / 1000), 'refresh keeps the admin end');
+
+    // Admin sessions from before the 5-hour rule end at their next refresh.
+    const legacyAdmin = jwt.sign({ userId: admin._id, type: 'refresh' }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    await RefreshToken.create({ userId: admin._id, token: legacyAdmin, expiresAt: new Date(Date.now() + 86400000) });
+    res = await call('POST', '/auth/refresh-token', { body: { refreshToken: legacyAdmin } });
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(codeOf(res), 'SESSION_EXPIRED');
+
+    // Customers have no fixed end.
+    const buyerPhone = `98${String(Date.now()).slice(-8)}`;
+    const buyer = await User.create({ name: 'P3 Buyer', phone: buyerPhone, passwordHash: 'buyerpass123', authProvider: 'email', role: 'buyer' });
+    made.users.push(buyer._id);
+    res = await call('POST', '/auth/login-phone', { body: { phone: buyerPhone, password: 'buyerpass123' } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(res.json.data.sessionExpiresAt, undefined, 'customer sessions are not capped');
+    assert.strictEqual(jwt.decode(res.json.data.accessToken).sx, undefined);
+    res = await call('POST', '/auth/refresh-token', { body: { refreshToken: res.json.data.refreshToken } });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.json.data.sessionExpiresAt, undefined);
 
     // Admin creates a staff account with an initial password.
     res = await call('POST', '/admin/staff', { token: adminToken, body: { name: 'P3 Staff', email, password: 'firstpass123' } });
@@ -86,7 +111,7 @@ async function run() {
     res = await call('POST', '/auth/staff-login', { body: { email, password: 'firstpass123' } });
     assert.strictEqual(res.status, 200, JSON.stringify(res.json));
     const sessionEnd = new Date(res.json.data.sessionExpiresAt).getTime();
-    assert.ok(Math.abs(sessionEnd - (before + 6 * 3600 * 1000)) < 5000, 'session lasts 6 hours');
+    assert.ok(Math.abs(sessionEnd - (before + 5 * 3600 * 1000)) < 5000, 'session lasts 5 hours');
     let { accessToken, refreshToken } = res.json.data;
     const access = jwt.decode(accessToken);
     assert.strictEqual(access.sx * 1000, Math.floor(sessionEnd / 1000) * 1000);

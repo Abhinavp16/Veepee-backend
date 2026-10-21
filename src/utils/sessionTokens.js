@@ -9,9 +9,10 @@ const toSeconds = (value, fallback) => {
 const ACCESS_SECONDS = () => toSeconds(process.env.JWT_ACCESS_EXPIRY, 15 * 60);
 const REFRESH_SECONDS = () => toSeconds(process.env.JWT_REFRESH_EXPIRY, 7 * 86400);
 
-// Staff sign in for a fixed working session: it can be refreshed, but never
-// past this many hours after the original sign-in.
-const STAFF_SESSION_SECONDS = 6 * 3600;
+// Admins and staff sign in for a fixed working session: it can be refreshed,
+// but never past 5 hours after the original sign-in. DASHBOARD_SESSION_LENGTH
+// ("5h", "90s", ...) shortens it for testing.
+const DASHBOARD_SESSION_SECONDS = () => toSeconds(process.env.DASHBOARD_SESSION_LENGTH, 5 * 3600);
 
 /**
  * Expiry (epoch seconds) for a token whose lifetime is `lifetimeSeconds`,
@@ -26,6 +27,6 @@ module.exports = {
   toSeconds,
   ACCESS_SECONDS,
   REFRESH_SECONDS,
-  STAFF_SESSION_SECONDS,
+  DASHBOARD_SESSION_SECONDS,
   tokenExpiry,
 };

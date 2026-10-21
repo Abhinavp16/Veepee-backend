@@ -9,7 +9,7 @@ const { sanitizeUser } = require('../utils/helpers');
 const { requireAcceptance, buildAcceptanceFields } = require('../config/legalAcceptance');
 const { notifyTeam } = require('../services/adminNotificationService');
 
-const { ACCESS_SECONDS, REFRESH_SECONDS, STAFF_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
+const { ACCESS_SECONDS, REFRESH_SECONDS, DASHBOARD_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
 
 // `sessionEndsAt` (a Date) hard-limits the session, as it does for staff.
 const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {}) => {
@@ -40,6 +40,12 @@ const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {})
 
 // Staff sign in only through the staff login, so their sessions are always
 // time-limited; the shared logins turn them away.
+// Admin and staff sessions end 5 hours after sign-in; customers' don't.
+const isDashboardRole = (role) => role === USER_ROLES.ADMIN || role === USER_ROLES.STAFF;
+const sessionEndFor = (user) => (isDashboardRole(user.role)
+  ? new Date(Date.now() + DASHBOARD_SESSION_SECONDS() * 1000)
+  : null);
+
 const rejectStaff = (user) => {
   if (user.role === USER_ROLES.STAFF) {
     throw new ForbiddenError('Staff accounts sign in from the staff area', 'STAFF_LOGIN_REQUIRED');
@@ -147,7 +153,7 @@ exports.login = async (req, res, next) => {
     user.lastLoginAt = new Date();
     await user.save();
 
-    const tokens = await generateTokens(user._id, req.headers['user-agent']);
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt: sessionEndFor(user) });
 
     res.json({
       success: true,
@@ -177,8 +183,7 @@ exports.staffLogin = async (req, res, next) => {
     user.lastLoginAt = new Date();
     await user.save();
 
-    const sessionEndsAt = new Date(Date.now() + STAFF_SESSION_SECONDS * 1000);
-    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt });
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt: sessionEndFor(user) });
 
     res.json({
       success: true,
@@ -263,7 +268,7 @@ exports.loginWithPhone = async (req, res, next) => {
     user.lastLoginAt = new Date();
     await user.save();
 
-    const tokens = await generateTokens(user._id, req.headers['user-agent']);
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt: sessionEndFor(user) });
 
     res.json({
       success: true,
@@ -424,11 +429,11 @@ exports.refreshToken = async (req, res, next) => {
       throw new UnauthorizedError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
     }
 
-    // Staff sessions end at a fixed time and cannot be renewed past it. A
-    // staff token with no recorded end predates that rule, so it ends now.
+    // Admin and staff sessions end at a fixed time and cannot be renewed past
+    // it. One with no recorded end predates that rule, so it ends now.
     const sessionEndsAt = storedToken.sessionExpiresAt;
-    const staffUser = await User.findById(user._id).select('role');
-    if (staffUser?.role === USER_ROLES.STAFF && !sessionEndsAt) {
+    const account = await User.findById(user._id).select('role');
+    if (isDashboardRole(account?.role) && !sessionEndsAt) {
       throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
     }
     if (sessionEndsAt && sessionEndsAt <= new Date()) {

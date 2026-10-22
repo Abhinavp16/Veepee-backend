@@ -131,13 +131,16 @@ async function run() {
     card = await priceOf(pump, wholesaler.token);
     assert.strictEqual(card.price, 750, 'wholesaler: 25% off MRP');
     assert.strictEqual(card.negotiationPrice, 800, 'price requests start from the normal price');
-    assert.strictEqual((await priceOf(pump)).price, 800, 'guests are customers');
+    assert.strictEqual((await priceOf(pump)).price, 1000, 'guests see only the MRP (guest prices off)');
     res = await call('GET', `/products?limit=50`, buyer.token);
     const listed = res.json.data.find((p) => String(p.id) === String(pump._id));
     assert.strictEqual(listed.price, 800, 'lists show the sale price too');
     console.log('2. live sale: customer/wholesaler %, own %, never dearer, guests, lists, price requests at normal price');
 
-    // 2b. The website's category products carry the sale (badge and price), only where it's cheaper.
+    // 2b. The website's category products carry the sale (badge and price), only where it's cheaper
+    // (with customer prices shown to guests; tests/guestPricing.test.js covers the switch off).
+    res = await call('PUT', '/admin/settings', admin.token, { features: { showCustomerPriceToGuests: true } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
     await M.WebsiteSettings.updateOne(
       { _id: 'website_settings' },
       { $set: { productCategories: [{ name: `Pumps ${suffix}`, isActive: true, order: 0, products: [], productDetails: [
@@ -155,6 +158,8 @@ async function run() {
     assert.strictEqual(onWebsite(pump).sale.percent, 20);
     assert.strictEqual(onWebsite(pump).sale.name, saleBody.name);
     assert.strictEqual(onWebsite(pump).retailPrice, 900, 'the normal price stays as it was');
+    res = await call('PUT', '/admin/settings', admin.token, { features: { showCustomerPriceToGuests: false } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
     assert.strictEqual(onWebsite(nozzle).sale, undefined, 'no badge where the sale isn\'t cheaper');
     assert.strictEqual(onWebsite(hoe).sale, undefined, 'no badge outside the sale');
     console.log('2b. website category products: sale price and badge only where the sale applies');

@@ -11,6 +11,7 @@ const {
   productCategoryPopulate,
 } = require('../utils/categoryHelpers');
 const { loadDiscountContext, pricingForUser, pendingPriceNotice } = require('../services/productPricingService');
+const { shopperRole } = require('../services/guestPricing');
 const { quantityRules } = require('../utils/quantityRules');
 const {
   isComingSoon,
@@ -44,7 +45,11 @@ const shopperBlock = (product, role, ctx, now) => {
     }
     block.discountPercent = 0;
   }
-  block.pendingPriceChange = block.priceHidden ? null : pendingPriceNotice(product, role, block, now);
+  // No scheduled-change notice when the price is hidden (coming soon, or a
+  // visitor seeing only the MRP).
+  block.pendingPriceChange = block.priceHidden || block.guestPriceHidden
+    ? null
+    : pendingPriceNotice(product, role, block, now);
   return block;
 };
 
@@ -105,7 +110,7 @@ exports.getProducts = async (req, res, next) => {
       sort,
     } = req.query;
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
-    const userRole = req.user?.role || 'guest';
+    const userRole = shopperRole(req);
 
     console.log('getProducts request - category:', category, 'brand:', brand);
 
@@ -197,7 +202,7 @@ exports.getProducts = async (req, res, next) => {
 
 exports.getProductBySlug = async (req, res, next) => {
   try {
-    const userRole = req.user?.role || 'guest';
+    const userRole = shopperRole(req);
     const param = req.params.slug;
 
     // Try public lookup by active slug first.
@@ -381,7 +386,7 @@ exports.getCategories = async (req, res, next) => {
 
 exports.getFeaturedProducts = async (req, res, next) => {
   try {
-    const userRole = req.user?.role || 'guest';
+    const userRole = shopperRole(req);
 
     const products = await Product.find({
       status: PRODUCT_STATUS.ACTIVE,
@@ -427,7 +432,7 @@ exports.searchProducts = async (req, res, next) => {
   try {
     const { q, category, categorySlug, brand } = req.query;
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
-    const userRole = req.user?.role || 'guest';
+    const userRole = shopperRole(req);
 
     console.log('Search request - q:', q, 'category:', category, 'brand:', brand);
 
@@ -669,7 +674,7 @@ exports.updateProductNameHindi = async (req, res, next) => {
 exports.getRelatedProducts = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userRole = req.user?.role || 'guest';
+    const userRole = shopperRole(req);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 50);
 
     const isObjectId = require('mongoose').Types.ObjectId.isValid(id);

@@ -6,6 +6,7 @@ const { formatPaginationResponse } = require('../utils/helpers');
 const { productCategoryPopulate } = require('../utils/categoryHelpers');
 const { loadDiscountContext } = require('../services/productPricingService');
 const { productCard, CARD_SELECT } = require('./productController');
+const { shopperRole } = require('../services/guestPricing');
 const {
   saleStatus,
   saleIsFor,
@@ -20,7 +21,9 @@ const {
 
 const HOME_STRIP_PRODUCTS = 10;
 
-const viewerRole = (req) => (req.user?.role === USER_ROLES.WHOLESALER ? USER_ROLES.WHOLESALER : USER_ROLES.BUYER);
+// Which sales a request sees: a wholesaler's, or a customer's (guests, and a
+// wholesaler viewing the app as a customer).
+const viewerRole = (req) => (shopperRole(req) === USER_ROLES.WHOLESALER ? USER_ROLES.WHOLESALER : USER_ROLES.BUYER);
 const idString = (value) => (value == null ? '' : String(value._id || value));
 
 function salePayload(sale, req, now = new Date(), visibleProducts = null) {
@@ -83,7 +86,7 @@ async function categoryMap() {
 }
 
 async function saleCards(sale, products, req, now = new Date()) {
-  const role = req.user?.role || 'guest';
+  const role = shopperRole(req);
   const ctx = await loadDiscountContext(products);
   const live = saleStatus(sale, now) === 'live';
   const entryById = new Map((sale.products || []).map((entry) => [idString(entry.productId), entry]));

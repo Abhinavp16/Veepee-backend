@@ -35,14 +35,18 @@ const getPrimaryWebsiteProductImage = (product = {}) => {
   return primary?.url || '';
 };
 
-// The website's sale badge: the customer sale price and the sale, only while
-// a sale for customers is live on this product.
-const websiteSaleFields = (product, ctx) => {
-  const { priceFor } = require('../services/productPricingService');
-  const own = ctx ? priceFor(product, 'buyer', ctx) : null;
-  if (!own?.sale) return {};
+// The website's prices. The website is public, so it never gets the wholesale
+// price. The customer price (and a live sale's price and badge) only when the
+// admin shows customer prices to guests; otherwise the website shows the MRP.
+const websitePriceFields = (product, ctx) => {
+  if (!ctx || ctx.guestMrpOnly) return { retailPrice: 0, wholesalePrice: 0 };
+  const { priceFor, normalPriceFor } = require('../services/productPricingService');
+  const normal = normalPriceFor(product, 'buyer', ctx);
+  const own = priceFor(product, 'buyer', ctx);
+  const fields = { retailPrice: Number(normal.price) || 0, wholesalePrice: 0 };
+  if (!own?.sale) return fields;
   const { id, name, theme, percent, endsAt } = own.sale;
-  return { salePrice: own.price, sale: { id: String(id), name, theme, percent, endsAt } };
+  return { ...fields, salePrice: own.price, sale: { id: String(id), name, theme, percent, endsAt } };
 };
 
 const mapLiveProductToWebsiteProduct = (product, fallback = {}, order = 0, ctx = null) => {
@@ -69,7 +73,7 @@ const mapLiveProductToWebsiteProduct = (product, fallback = {}, order = 0, ctx =
     image,
     images: images.length > 0 ? images : (image ? [image] : []),
     order,
-    ...websiteSaleFields(product, ctx),
+    ...websitePriceFields(product, ctx),
   };
 };
 
@@ -285,6 +289,8 @@ router.get('/settings/website-content', async (req, res, next) => {
     const pricingCtx = linkedProducts.length > 0
       ? await loadDiscountContext(linkedProducts, { sales: 'cached' })
       : null;
+    const { guestPricesShown } = require('../services/guestPricing');
+    const guestPrices = await guestPricesShown();
     const linkedProductsById = new Map(linkedProducts.map((product) => [String(product._id), product]));
 
     const productCategories = rawProductCategories.map((category, categoryIndex) => {
@@ -306,7 +312,13 @@ router.get('/settings/website-content', async (req, res, next) => {
             return mapLiveProductToWebsiteProduct(liveProduct, detail, detailIndex, pricingCtx);
           }
 
-          const storedProduct = mapStoredWebsiteProduct(detail, detailIndex);
+          // Typed in the website editor: never the wholesale price, and the
+          // customer price only while guests may see it.
+          const storedProduct = {
+            ...mapStoredWebsiteProduct(detail, detailIndex),
+            wholesalePrice: 0,
+            ...(guestPrices ? {} : { retailPrice: 0 }),
+          };
           return storedProduct.name ? storedProduct : null;
         })
         .filter(Boolean);

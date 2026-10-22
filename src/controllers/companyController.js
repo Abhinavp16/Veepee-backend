@@ -192,8 +192,10 @@ exports.getCompanyProducts = async (req, res, next) => {
       throw new NotFoundError('Company not found', 'COMPANY_NOT_FOUND');
     }
 
-    const products = await Product.find({ company: company._id })
-      .select('name slug retailPrice images status')
+    // Public: the brand's live products, without prices (the catalogue
+    // endpoints price them for whoever is asking).
+    const products = await Product.find({ company: company._id, status: 'active' })
+      .select('name slug images status')
       .sort({ createdAt: -1 });
 
     res.json({

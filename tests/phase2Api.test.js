@@ -40,6 +40,13 @@ async function run() {
   const { sweepDueLaunches } = require('../src/services/productLaunchService');
 
   await connectDB();
+  // These tests check customer prices by asking as a guest: show customer
+  // prices to guests (tests/guestPricing.test.js covers the switch off).
+  await require('../src/models').Settings.updateOne(
+    { _id: 'app_settings' },
+    { $set: { 'features.showCustomerPriceToGuests': true } },
+    { upsert: true },
+  );
   const server = http.createServer(app).listen(0);
   const base = `http://127.0.0.1:${server.address().port}/api/v1`;
   const call = async (method, path, { token, body } = {}) => {

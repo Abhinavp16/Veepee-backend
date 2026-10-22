@@ -1,4 +1,5 @@
 const { Settings } = require('../../models');
+const { forgetGuestPricing } = require('../../services/guestPricing');
 
 // Leftover Razorpay fields are never sent (the gateway was removed).
 const withoutRazorpay = (settings) => {
@@ -55,12 +56,18 @@ exports.updateSettings = async (req, res, next) => {
     ];
 
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
+      if (req.body[field] === undefined) continue;
+      if (field === 'features') {
+        // Merge, so saving one switch never resets the others.
+        const current = settings.features?.toObject?.() || settings.features || {};
+        settings.features = { ...current, ...req.body.features };
+      } else {
         settings[field] = req.body[field];
       }
     }
 
     await settings.save();
+    forgetGuestPricing();
 
     res.json({
       success: true,

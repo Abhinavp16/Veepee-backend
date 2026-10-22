@@ -62,6 +62,8 @@ const settingsSchema = new mongoose.Schema({
     negotiationsEnabled: { type: Boolean, default: true },
     guestCheckout: { type: Boolean, default: false },
     maintenanceMode: { type: Boolean, default: false },
+    // Off: visitors who aren't signed in see only the MRP.
+    showCustomerPriceToGuests: { type: Boolean, default: false },
   },
 
   mobileApp: {

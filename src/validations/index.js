@@ -585,6 +585,7 @@ const adminValidation = {
       negotiationsEnabled: Joi.boolean(),
       guestCheckout: Joi.boolean(),
       maintenanceMode: Joi.boolean(),
+      showCustomerPriceToGuests: Joi.boolean(),
     }),
     heroBanners: Joi.array().items(Joi.object({
       title: Joi.string().required(),

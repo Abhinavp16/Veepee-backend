@@ -1,6 +1,7 @@
 const { Company, Category } = require('../models');
 const { getCachedCategories } = require('./categoryDiscountCache');
 const { getSaleIndex, saleOfferFor, saleSummary, personalSaleLimits } = require('./saleService');
+const { guestPricesShown } = require('./guestPricing');
 
 const DISCOUNT_FIELDS = '+customerDiscountPercent +wholesalerDiscountPercent';
 
@@ -23,14 +24,18 @@ const percentOf = (doc, role) => {
  */
 const loadDiscountContext = async (products, { sales = 'cached' } = {}) => {
   const companyIds = [...new Set(products.map((p) => idOf(p.company)).filter(Boolean))];
-  const [companies, categories, saleIndex] = await Promise.all([
+  const [companies, categories, saleIndex, guestPrices] = await Promise.all([
     companyIds.length
       ? Company.find({ _id: { $in: companyIds } }).select(DISCOUNT_FIELDS).lean()
       : [],
     getCachedCategories(() => Category.find({}).select(`parent ${DISCOUNT_FIELDS}`).lean()),
     sales ? getSaleIndex({ cached: sales === 'cached' }) : null,
+    guestPricesShown(),
   ]);
   return {
+    // Visitors who aren't signed in see only the MRP unless the admin shows
+    // them customer prices.
+    guestMrpOnly: !guestPrices,
     companies: new Map(companies.map((c) => [idOf(c), c])),
     categories: new Map(categories.map((c) => [idOf(c), c])),
     saleIndex,
@@ -105,10 +110,29 @@ const normalPriceFor = (product, role, ctx) => {
 };
 
 /**
+ * What a visitor who isn't signed in sees while customer prices are hidden:
+ * the MRP as the price, no discount, no sale. Products without an MRP show
+ * their normal customer price (there is nothing else to show).
+ */
+const guestMrpPricing = (product, ctx) => {
+  const normal = normalPriceFor(product, 'buyer', ctx);
+  const mrp = Number(normal.mrp) || 0;
+  return {
+    price: mrp > 0 ? mrp : normal.price,
+    mrp: mrp > 0 ? mrp : normal.mrp,
+    canNegotiate: false,
+    discountPercent: 0,
+    sale: null,
+    guestPriceHidden: true,
+  };
+};
+
+/**
  * Role-based price block used by every product response. Wholesalers also see
  * the price a customer would pay.
  */
 const pricingForUser = (product, role, ctx) => {
+  if (role === 'guest' && ctx?.guestMrpOnly) return guestMrpPricing(product, ctx);
   const own = priceFor(product, role, ctx);
   if (role === 'wholesaler') {
     return {

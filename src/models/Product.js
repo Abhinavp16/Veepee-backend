@@ -44,6 +44,13 @@ const productSchema = new mongoose.Schema({
     ref: 'Category',
     default: null,
   },
+  // Where it's sold: a category, or a category › sub-category. The first is
+  // its main home. categoryIds / primaryCategoryId are kept in step with these.
+  placements: [{
+    _id: false,
+    category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
+    subCategory: { type: mongoose.Schema.Types.ObjectId, ref: 'SubCategory', default: null },
+  }],
   brand: {
     type: String,
     default: '',
@@ -242,6 +249,7 @@ productSchema.index({ sku: 1 }, { unique: true });
 productSchema.index({ category: 1, status: 1 });
 productSchema.index({ categoryIds: 1, status: 1 });
 productSchema.index({ primaryCategoryId: 1, status: 1 });
+productSchema.index({ 'placements.category': 1, 'placements.subCategory': 1, status: 1 });
 productSchema.index({ company: 1, categoryIds: 1, status: 1 });
 productSchema.index({ company: 1, category: 1, status: 1 });
 productSchema.index({ status: 1, isFeatured: -1 });

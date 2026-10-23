@@ -19,6 +19,7 @@ const AffiliateCommission = require('./AffiliateCommission');
 const Review = require('./Review');
 const WebsiteSettings = require('./WebsiteSettings');
 const Category = require('./Category');
+const SubCategory = require('./SubCategory');
 const PriceChangeAudit = require('./PriceChangeAudit');
 const AccountDeletionRequest = require('./AccountDeletionRequest');
 const LeadContact = require('./LeadContact');
@@ -50,6 +51,7 @@ module.exports = {
   Review,
   WebsiteSettings,
   Category,
+  SubCategory,
   PriceChangeAudit,
   AccountDeletionRequest,
 };

@@ -226,6 +226,7 @@ exports.createProduct = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(productData, 'company') && !String(productData.company || '').trim()) {
       productData.company = null;
     }
+    productData.placements = assignment.placements;
     productData.categoryIds = assignment.categoryIds;
     productData.primaryCategoryId = assignment.primaryCategoryId;
     productData.category = assignment.category;
@@ -289,6 +290,7 @@ exports.updateProduct = async (req, res, next) => {
     const assignment = await resolveCategoryAssignment(updateData, product);
     await validateCompanyCategoryAssignment(updateData, product, assignment);
     if (assignment) {
+      updateData.placements = assignment.placements;
       updateData.categoryIds = assignment.categoryIds;
       updateData.primaryCategoryId = assignment.primaryCategoryId;
       updateData.category = assignment.category;

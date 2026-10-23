@@ -31,6 +31,66 @@ function normalizeObjectIds(value, field = 'categoryIds') {
   return [...new Set(ids)];
 }
 
+// "Where it's sold": [{ category, subCategory? }], as an array or a JSON string
+// (multipart forms). Duplicates are dropped; the first entry stays first.
+function normalizePlacements(value) {
+  let list = value;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list.trim() || '[]');
+    } catch (_) {
+      throw new BadRequestError('placements must be a list', 'INVALID_PLACEMENTS');
+    }
+  }
+  if (!Array.isArray(list)) throw new BadRequestError('placements must be a list', 'INVALID_PLACEMENTS');
+  const seen = new Set();
+  const placements = [];
+  for (const item of list) {
+    const category = String(item?.category?._id || item?.category || '').trim();
+    const rawSub = item?.subCategory?._id || item?.subCategory;
+    const subCategory = rawSub ? String(rawSub).trim() : null;
+    if (!mongoose.Types.ObjectId.isValid(category) || (subCategory && !mongoose.Types.ObjectId.isValid(subCategory))) {
+      throw new BadRequestError('placements must contain valid category and sub-category IDs', 'INVALID_PLACEMENTS');
+    }
+    const key = `${category}:${subCategory || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    placements.push({ category, subCategory });
+  }
+  return placements;
+}
+
+// Sub-categories in placements must exist and be shown under that category.
+async function validatePlacementSubCategories(placements) {
+  const SubCategory = require('../models/SubCategory');
+  const subIds = [...new Set(placements.map((p) => p.subCategory).filter(Boolean))];
+  if (subIds.length === 0) return;
+  const subs = await SubCategory.find({ _id: { $in: subIds } }).select('_id categories').lean();
+  const linksBySub = new Map(subs.map((sub) => [
+    String(sub._id),
+    new Set((sub.categories || []).map((link) => String(link.category))),
+  ]));
+  for (const placement of placements) {
+    if (!placement.subCategory) continue;
+    const links = linksBySub.get(placement.subCategory);
+    if (!links) throw new BadRequestError('Sub-category not found', 'INVALID_SUB_CATEGORY');
+    if (!links.has(placement.category)) {
+      throw new BadRequestError('That sub-category is not shown under this category', 'SUB_CATEGORY_NOT_LINKED');
+    }
+  }
+}
+
+// Placements kept in step with a plain category list: sub-category placements
+// stay while their category is still assigned; any category without one gets
+// a direct placement.
+function placementsForCategoryIds(ids, existing = []) {
+  const kept = (existing || [])
+    .map((p) => ({ category: String(p.category?._id || p.category), subCategory: p.subCategory ? String(p.subCategory?._id || p.subCategory) : null }))
+    .filter((p) => ids.includes(p.category));
+  const covered = new Set(kept.map((p) => p.category));
+  return [...kept, ...ids.filter((id) => !covered.has(id)).map((id) => ({ category: id, subCategory: null }))];
+}
+
 function legacyFallbackCondition(slugs) {
   return {
     $and: [
@@ -99,16 +159,27 @@ async function getCategoryAndDescendantsById(categoryId, { activeOnly = false } 
 }
 
 async function resolveCategoryAssignment(input, existingProduct = null) {
-  const categoryFieldsPresent = ['categoryIds', 'primaryCategoryId', 'category']
+  const categoryFieldsPresent = ['placements', 'categoryIds', 'primaryCategoryId', 'category']
     .some((field) => hasOwn(input, field));
   if (!categoryFieldsPresent && existingProduct) return null;
 
-  let ids = hasOwn(input, 'categoryIds')
-    ? normalizeObjectIds(input.categoryIds)
-    : normalizeObjectIds(existingProduct?.categoryIds || []);
+  // "Where it's sold" decides the categories: each distinct category, in
+  // order, with the first as the main one unless another is chosen.
+  let placements = hasOwn(input, 'placements') ? normalizePlacements(input.placements) : null;
+  if (placements && placements.length === 0) {
+    throw new BadRequestError('At least one category is required', 'CATEGORY_REQUIRED');
+  }
+  let ids = placements
+    ? [...new Set(placements.map((p) => p.category))]
+    : hasOwn(input, 'categoryIds')
+      ? normalizeObjectIds(input.categoryIds)
+      : normalizeObjectIds(existingProduct?.categoryIds || []);
   let primaryId = hasOwn(input, 'primaryCategoryId')
     ? String(input.primaryCategoryId || '').trim()
     : String(existingProduct?.primaryCategoryId || '').trim();
+  // With a new "Where it's sold" list, its first row is the main category
+  // (unless one is chosen explicitly).
+  if (placements && (!hasOwn(input, 'primaryCategoryId') || !ids.includes(primaryId))) primaryId = ids[0];
 
   const legacySlug = String(input.category || '').trim().toLowerCase();
   if (legacySlug && (!hasOwn(input, 'categoryIds') || !hasOwn(input, 'primaryCategoryId'))) {
@@ -119,8 +190,8 @@ async function resolveCategoryAssignment(input, existingProduct = null) {
       throw new BadRequestError('Legacy category must match an active category slug', 'INVALID_CATEGORY');
     }
     const legacyId = String(legacyCategory._id);
-    if (!hasOwn(input, 'categoryIds')) ids = [legacyId];
-    if (!hasOwn(input, 'primaryCategoryId')) primaryId = legacyId;
+    if (!placements && !hasOwn(input, 'categoryIds')) ids = [legacyId];
+    if (!placements && !hasOwn(input, 'primaryCategoryId')) primaryId = legacyId;
   }
 
   if (ids.length === 0) {
@@ -141,8 +212,13 @@ async function resolveCategoryAssignment(input, existingProduct = null) {
   }
   const byId = new Map(categories.map((category) => [String(category._id), category]));
   const primaryCategory = byId.get(primaryId);
+  if (placements) await validatePlacementSubCategories(placements);
+  else placements = placementsForCategoryIds(ids, existingProduct?.placements);
+  // The main placement first.
+  placements.sort((a, b) => (a.category === primaryId ? 0 : 1) - (b.category === primaryId ? 0 : 1));
 
   return {
+    placements,
     categoryIds: ids,
     primaryCategoryId: primaryId,
     category: primaryCategory.slug,
@@ -210,6 +286,8 @@ module.exports = {
   getCategoryAndDescendantsById,
   legacyFallbackCondition,
   normalizeObjectIds,
+  normalizePlacements,
+  placementsForCategoryIds,
   productCategoryPopulate,
   resolveCategoryAssignment,
   validateCompanyCategoryAssignment,

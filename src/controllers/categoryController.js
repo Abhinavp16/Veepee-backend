@@ -14,10 +14,10 @@ const {
   validateParent,
 } = require('../services/categoryService');
 
-async function getCategoryProductSets(categories, status = PRODUCT_STATUS.ACTIVE) {
+async function getCategoryProductSets(categories, status = PRODUCT_STATUS.ACTIVE, extraMatch = null) {
   if (categories.length === 0) return new Map();
   const grouped = await Product.aggregate([
-    { $match: { status } },
+    { $match: extraMatch ? { status, ...extraMatch } : { status } },
     {
       $project: {
         category: 1,
@@ -49,8 +49,8 @@ async function getCategoryProductSets(categories, status = PRODUCT_STATUS.ACTIVE
   }));
 }
 
-async function getRecursiveProductCounts(categories) {
-  const directSets = await getCategoryProductSets(categories);
+async function getRecursiveProductCounts(categories, extraMatch = null) {
+  const directSets = await getCategoryProductSets(categories, PRODUCT_STATUS.ACTIVE, extraMatch);
   const childrenByParent = new Map();
   for (const category of categories) {
     const key = idString(category.parent);
@@ -78,7 +78,7 @@ async function getRecursiveProductCounts(categories) {
 
 exports.getCategories = async (req, res, next) => {
   try {
-    const { parent, active, search } = req.query;
+    const { parent, active, search, brand } = req.query;
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
     const query = {};
     if (parent === 'root') query.parent = null;
@@ -96,14 +96,19 @@ exports.getCategories = async (req, res, next) => {
       Category.countDocuments(query),
       Category.find(active === 'true' ? { isActive: true } : {}).select('_id slug parent').lean(),
     ]);
-    const counts = await getRecursiveProductCounts(allCategories);
+    // A brand's page: counts only that brand's products, and only the
+    // categories it sells in.
+    const byBrand = brand ? await require('./subCategoryController').brandCondition(brand) : null;
+    const counts = await getRecursiveProductCounts(allCategories, byBrand);
+    let rows = categories.map((category) => ({
+      ...category,
+      productCount: counts.get(String(category._id)) || 0,
+    }));
+    if (byBrand) rows = rows.filter((category) => category.productCount > 0);
 
     res.json({
       success: true,
-      ...formatPaginationResponse(categories.map((category) => ({
-        ...category,
-        productCount: counts.get(String(category._id)) || 0,
-      })), total, page, limit),
+      ...formatPaginationResponse(rows, total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -270,6 +275,11 @@ exports.deleteCategory = async (req, res, next) => {
     category = await Category.findById(category._id);
     const order = category.order;
     await category.deleteOne();
+    // Sub-categories stop showing under it.
+    await require('../models/SubCategory').updateMany(
+      { 'categories.category': category._id },
+      { $pull: { categories: { category: category._id } } }
+    );
     await Category.updateMany({ ...parentFilter(parent), order: { $gt: order } }, { $inc: { order: -1 } });
     await normalizeSiblingOrders(parent);
     res.json({ success: true, message: 'Category deleted successfully' });

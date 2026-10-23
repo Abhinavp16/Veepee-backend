@@ -10,6 +10,14 @@ const categoryIds = Joi.alternatives().try(
   Joi.array().items(objectId).min(1),
   Joi.string().trim().min(1)
 );
+// "Where it's sold": a category, or a category › sub-category.
+const placements = Joi.alternatives().try(
+  Joi.array().items(Joi.object({
+    category: objectId.required(),
+    subCategory: objectId.allow(null, ''),
+  })).min(1),
+  Joi.string().trim().min(1)
+);
 
 const storeUrl = Joi.string()
   .uri({ scheme: ['https'] })
@@ -173,6 +181,7 @@ const productValidation = {
     limit: Joi.number().integer().min(1).max(50).default(20),
     category: Joi.string().max(100).allow('', null),
     categorySlug: Joi.string().trim().lowercase().max(100).allow('', null),
+    subCategory: Joi.string().trim().lowercase().max(100).allow('', null),
     brand: Joi.string().max(200).allow('', null),
     minPrice: Joi.number().min(0),
     maxPrice: Joi.number().min(0),
@@ -350,6 +359,7 @@ const adminValidation = {
     shortDescription: Joi.string().max(300),
     category: Joi.string(),
     categoryIds,
+    placements,
     primaryCategoryId: objectId,
     subCategory: Joi.string().allow('', null),
     tags: Joi.array().items(Joi.string()),
@@ -390,7 +400,7 @@ const adminValidation = {
     company: Joi.string().allow('', null),
     videoUrl: Joi.string().allow('', null),
     shippingTerms: Joi.string().allow('', null),
-  }).or('category', 'categoryIds'),
+  }).or('category', 'categoryIds', 'placements'),
 
   updateProduct: Joi.object({
     name: Joi.string().max(200),
@@ -398,6 +408,7 @@ const adminValidation = {
     shortDescription: Joi.string().max(300),
     category: Joi.string(),
     categoryIds,
+    placements,
     primaryCategoryId: objectId.allow('', null),
     subCategory: Joi.string().allow('', null),
     tags: Joi.array().items(Joi.string()),

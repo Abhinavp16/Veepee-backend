@@ -1,4 +1,4 @@
-const { Product, Analytics, WebsiteSettings, Company, Category, ProductAlert } = require('../models');
+const { Product, Analytics, WebsiteSettings, Company, Category, SubCategory, ProductAlert } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS, ANALYTICS_EVENTS } = require('../utils/constants');
@@ -121,8 +121,10 @@ exports.getProducts = async (req, res, next) => {
     const priceField = userRole === 'wholesaler' ? 'wholesalePrice' : 'retailPrice';
     
     const categorySlugFilter = categorySlug?.trim();
+    let browsedCategoryIds = null;
     if (categorySlugFilter) {
       const categories = await getCategoryAndDescendants(categorySlugFilter);
+      browsedCategoryIds = categories.map((item) => item._id);
       andConditions.push(categoryProductCondition(categories));
     } else if (category) {
       const normalized = String(category).trim();
@@ -137,6 +139,23 @@ exports.getProducts = async (req, res, next) => {
       else query.category = { $regex: escapeRegExp(normalized), $options: 'i' };
     }
     
+    // A sub-category: only products placed under it, inside the category
+    // being browsed when there is one (a shared "Blades" under Brush Cutter
+    // lists only Brush Cutter's blades).
+    const subCategorySlug = String(req.query.subCategory || '').trim().toLowerCase();
+    if (subCategorySlug) {
+      const subCategory = await SubCategory.findOne({ slug: subCategorySlug, isActive: true }).select('_id').lean();
+      if (!subCategory) throw new NotFoundError('Sub-category not found', 'SUB_CATEGORY_NOT_FOUND');
+      andConditions.push({
+        placements: {
+          $elemMatch: {
+            subCategory: subCategory._id,
+            ...(browsedCategoryIds ? { category: { $in: browsedCategoryIds } } : {}),
+          },
+        },
+      });
+    }
+
     // Filter by brand (checks both product.brand and product.company)
     if (brand) {
       const matchingCompanies = await Company.find({
@@ -452,9 +471,17 @@ exports.searchProducts = async (req, res, next) => {
         isActive: true,
         $or: [{ name: regex }, { slug: regex }],
       }).select('_id slug').lean();
+      // "blade" also finds products placed under a "Blades" sub-category.
+      const matchingSubCategories = await SubCategory.find({
+        isActive: true,
+        $or: [{ name: regex }, { slug: regex }],
+      }).select('_id').lean();
 
       andConditions.push({
         $or: [
+          ...(matchingSubCategories.length > 0
+            ? [{ 'placements.subCategory': { $in: matchingSubCategories.map((sub) => sub._id) } }]
+            : []),
           { name: regex },
           { description: regex },
           { shortDescription: regex },

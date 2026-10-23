@@ -372,6 +372,7 @@ router.use('/admin', adminRoutes);
 router.use('/companies', companyRoutes);
 router.use('/sales', require('./saleRoutes'));
 router.use('/categories', categoryRoutes);
+router.use('/sub-categories', require('./subCategoryRoutes'));
 router.use('/upload', uploadRoutes);
 router.use('/notifications', notificationRoutes);
 

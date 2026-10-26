@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const { getRecursiveProductCounts } = require('./categoryController');
 const {
   categoryProductCondition,
+  directPlacementCondition,
   escapeRegExp,
   getCategoryAndDescendants,
   productCategoryPopulate,
@@ -122,8 +123,10 @@ exports.getProducts = async (req, res, next) => {
     
     const categorySlugFilter = categorySlug?.trim();
     let browsedCategoryIds = null;
+    let browsedCategories = null;
     if (categorySlugFilter) {
       const categories = await getCategoryAndDescendants(categorySlugFilter);
+      browsedCategories = categories;
       browsedCategoryIds = categories.map((item) => item._id);
       andConditions.push(categoryProductCondition(categories));
     } else if (category) {
@@ -143,6 +146,11 @@ exports.getProducts = async (req, res, next) => {
     // being browsed when there is one (a shared "Blades" under Brush Cutter
     // lists only Brush Cutter's blades).
     const subCategorySlug = String(req.query.subCategory || '').trim().toLowerCase();
+    // The category's own list: products placed straight in it. Those placed
+    // only under a sub-category show under its card instead.
+    if (browsedCategories && !subCategorySlug) {
+      andConditions.push(directPlacementCondition(browsedCategories));
+    }
     if (subCategorySlug) {
       const subCategory = await SubCategory.findOne({ slug: subCategorySlug, isActive: true }).select('_id').lean();
       if (!subCategory) throw new NotFoundError('Sub-category not found', 'SUB_CATEGORY_NOT_FOUND');

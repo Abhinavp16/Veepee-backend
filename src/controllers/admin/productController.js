@@ -16,6 +16,8 @@ const {
   categoryProductCondition,
   escapeRegExp,
   getCategoryAndDescendantsById,
+  placementState,
+  placementStateConditions,
   productCategoryPopulate,
   resolveCategoryAssignment,
   validateCompanyCategoryAssignment,
@@ -168,6 +170,12 @@ exports.getProducts = async (req, res, next) => {
       const regex = { $regex: escapeRegExp(String(search).slice(0, 200)), $options: 'i' };
       query.$and = [...(query.$and || []), { $or: [{ name: regex }, { sku: regex }] }];
     }
+    // Where products show: "both", "sub" (sub-category only) or "category".
+    if (req.query.placement) {
+      const condition = placementStateConditions[String(req.query.placement)];
+      if (!condition) throw new BadRequestError('placement must be both, sub or category', 'INVALID_PLACEMENT_FILTER');
+      query.$and = [...(query.$and || []), condition];
+    }
 
     let sortOption = { createdAt: -1, _id: -1 };
     if (sort) {
@@ -186,12 +194,33 @@ exports.getProducts = async (req, res, next) => {
       Product.countDocuments(query),
     ]);
 
+    // Names for each "Category › Sub-category" place, and whether it also
+    // shows in the category's own list.
+    const subIds = [...new Set(products.flatMap((product) => (product.placements || [])
+      .map((p) => p.subCategory && String(p.subCategory)).filter(Boolean)))];
+    const subNames = new Map((await require('../../models').SubCategory.find({ _id: { $in: subIds } })
+      .select('name').lean()).map((sub) => [String(sub._id), sub.name]));
+    const describe = (product) => {
+      const categoryNames = new Map((product.categoryIds || []).map((c) => [String(c._id || c), c.name || '']));
+      const list = product.placements || [];
+      const direct = new Set(list.filter((p) => !p.subCategory).map((p) => String(p.category)));
+      return list.filter((p) => p.subCategory).map((p) => ({
+        categoryId: String(p.category),
+        categoryName: categoryNames.get(String(p.category)) || '',
+        subCategoryId: String(p.subCategory),
+        subCategoryName: subNames.get(String(p.subCategory)) || '',
+        alsoInCategory: direct.has(String(p.category)),
+      }));
+    };
+
     res.json({
       success: true,
       ...formatPaginationResponse(products.map((product) => ({
         ...product,
         categories: product.categoryIds || [],
         primaryCategory: product.primaryCategoryId || null,
+        placementState: placementState(product.placements),
+        subPlacements: describe(product),
       })), total, page, limit),
     });
   } catch (error) {

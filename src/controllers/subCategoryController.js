@@ -8,6 +8,17 @@ const { notComingSoonFilter } = require('../utils/productAvailability');
 
 const idOf = (value) => (value == null ? null : String(value?._id || value));
 
+// A product's placements as plain ids.
+const plainPlacements = (placements) => (placements || [])
+  .map((p) => ({ category: idOf(p.category), subCategory: idOf(p.subCategory) }));
+
+// Whether a product also shows in the category's own list (a direct
+// placement), set on or off; its sub-category places stay.
+function setDirect(placements, categoryId, keep) {
+  const rest = placements.filter((p) => !(p.category === String(categoryId) && !p.subCategory));
+  return keep ? [...rest, { category: String(categoryId), subCategory: null }] : rest;
+}
+
 // Products of a brand: by its name on the product or its linked company.
 async function brandCondition(brand) {
   const name = String(brand || '').trim();
@@ -276,13 +287,16 @@ exports.reorder = async (req, res, next) => {
 };
 
 /**
- * POST /sub-categories/:id/products — { categoryId, productIds[] }
+ * POST /sub-categories/:id/products — { categoryId, productIds[], alsoInCategory? }
  * Places products as "Category › Sub-category". A product not yet in that
- * category gets it too, when its brand allows that category.
+ * category gets it too, when its brand allows that category. They show only
+ * under the sub-category unless `alsoInCategory` keeps them in the
+ * category's own list as well.
  */
 exports.addProducts = async (req, res, next) => {
   try {
     const { categoryId } = req.body;
+    const alsoInCategory = req.body.alsoInCategory === true;
     const sub = await SubCategory.findById(req.params.id).lean();
     if (!sub) throw new NotFoundError('Sub-category not found', 'SUB_CATEGORY_NOT_FOUND');
     if (!(sub.categories || []).some((link) => idOf(link.category) === String(categoryId))) {
@@ -307,10 +321,11 @@ exports.addProducts = async (req, res, next) => {
         skipped.push({ id: String(product._id), name: product.name, reason: `${company.name} is not linked to this category` });
         continue;
       }
-      const placements = (product.placements || []).length > 0
-        ? product.placements.map((p) => ({ category: idOf(p.category), subCategory: idOf(p.subCategory) }))
+      let placements = (product.placements || []).length > 0
+        ? plainPlacements(product.placements)
         : ids.map((id) => ({ category: id, subCategory: null }));
       placements.push({ category: String(categoryId), subCategory: String(sub._id) });
+      placements = setDirect(placements, categoryId, alsoInCategory);
       const update = {
         placements,
         categoryIds: [...new Set([...ids, String(categoryId)])],
@@ -334,7 +349,7 @@ exports.listProducts = async (req, res, next) => {
     const products = await Product.find({
       placements: { $elemMatch: { category: categoryId, subCategory: req.params.id } },
     })
-      .select('name sku status images brand company')
+      .select('name sku status images brand company placements')
       .populate('company', 'name')
       .sort({ name: 1 })
       .lean();
@@ -342,6 +357,8 @@ exports.listProducts = async (req, res, next) => {
       success: true,
       data: products.map((product) => ({
         _id: String(product._id),
+        // Also in the category's own list, not only under this sub-category.
+        alsoInCategory: (product.placements || []).some((p) => idOf(p.category) === String(categoryId) && !p.subCategory),
         name: product.name,
         sku: product.sku,
         status: product.status,
@@ -349,6 +366,38 @@ exports.listProducts = async (req, res, next) => {
         image: (product.images?.find((image) => image.isPrimary) || product.images?.[0])?.url || null,
       })),
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /sub-categories/:id/products — { categoryId, productIds[], alsoInCategory }
+ * For products placed under this sub-category (in that category): also show
+ * them in the category's own list, or only under the sub-category.
+ */
+exports.setAlsoInCategory = async (req, res, next) => {
+  try {
+    const { categoryId } = req.body;
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) throw new BadRequestError('Invalid category', 'INVALID_CATEGORY');
+    if (typeof req.body.alsoInCategory !== 'boolean') {
+      throw new BadRequestError('alsoInCategory must be true or false', 'INVALID_ALSO_IN_CATEGORY');
+    }
+    const productIds = [...new Set((Array.isArray(req.body.productIds) ? req.body.productIds : []).map(String))];
+    if (productIds.length === 0 || productIds.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+      throw new BadRequestError('productIds must be valid product IDs', 'INVALID_PRODUCT_IDS');
+    }
+    const products = await Product.find({
+      _id: { $in: productIds },
+      placements: { $elemMatch: { category: categoryId, subCategory: req.params.id } },
+    }).select('_id placements').lean();
+    for (const product of products) {
+      await Product.updateOne(
+        { _id: product._id },
+        { $set: { placements: setDirect(plainPlacements(product.placements), categoryId, req.body.alsoInCategory) } }
+      );
+    }
+    res.json({ success: true, data: { updated: products.length } });
   } catch (error) {
     next(error);
   }

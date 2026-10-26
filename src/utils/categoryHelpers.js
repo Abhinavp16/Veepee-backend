@@ -100,6 +100,62 @@ function legacyFallbackCondition(slugs) {
   };
 }
 
+// Where a product shows, per category it has a sub-category place in:
+// "both" (the category's list and the sub-category), "sub" (only the
+// sub-category), or "category" when it has no sub-category places.
+function placementState(placements) {
+  const list = (placements || []).map((p) => ({
+    category: String(p.category?._id || p.category),
+    subCategory: p.subCategory ? String(p.subCategory?._id || p.subCategory) : null,
+  }));
+  const direct = new Set(list.filter((p) => !p.subCategory).map((p) => p.category));
+  const subs = list.filter((p) => p.subCategory);
+  if (subs.length === 0) return 'category';
+  return subs.some((p) => !direct.has(p.category)) ? 'sub' : 'both';
+}
+
+// Mongo conditions for the admin filter on placementState.
+const placementStateConditions = (() => {
+  const subOf = { $ifNull: ['$$p.subCategory', null] };
+  const directCategories = {
+    $map: {
+      input: { $filter: { input: { $ifNull: ['$placements', []] }, as: 'd', cond: { $eq: [{ $ifNull: ['$$d.subCategory', null] }, null] } } },
+      as: 'd',
+      in: '$$d.category',
+    },
+  };
+  // How many sub-category places have no direct place in their category.
+  const loneSubs = {
+    $size: {
+      $filter: {
+        input: { $ifNull: ['$placements', []] },
+        as: 'p',
+        cond: { $and: [{ $ne: [subOf, null] }, { $not: [{ $in: ['$$p.category', directCategories] }] }] },
+      },
+    },
+  };
+  const hasSub = { placements: { $elemMatch: { subCategory: { $ne: null } } } };
+  return {
+    category: { placements: { $not: { $elemMatch: { subCategory: { $ne: null } } } } },
+    sub: { $and: [hasSub, { $expr: { $gt: [loneSubs, 0] } }] },
+    both: { $and: [hasSub, { $expr: { $eq: [loneSubs, 0] } }] },
+  };
+})();
+
+// Products shown in a category's own list: placed straight in it (not only
+// under one of its sub-categories), or with no placements yet (older data).
+function directPlacementCondition(categories) {
+  const list = Array.isArray(categories) ? categories : [categories];
+  const ids = list.map((category) => category?._id).filter(Boolean);
+  return {
+    $or: [
+      { placements: { $elemMatch: { category: { $in: ids }, subCategory: null } } },
+      { placements: { $exists: false } },
+      { placements: { $size: 0 } },
+    ],
+  };
+}
+
 function categoryProductCondition(categories) {
   const list = Array.isArray(categories) ? categories : [categories];
   const ids = list.map((category) => category?._id).filter(Boolean);
@@ -281,7 +337,10 @@ const productCategoryPopulate = [
 
 module.exports = {
   categoryProductCondition,
+  directPlacementCondition,
   escapeRegExp,
+  placementState,
+  placementStateConditions,
   getCategoryAndDescendants,
   getCategoryAndDescendantsById,
   legacyFallbackCondition,

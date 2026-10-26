@@ -13,6 +13,7 @@ router.post('/', protect, authorize('admin', 'staff'), subCategories.create);
 router.put('/:id', protect, authorize('admin', 'staff'), subCategories.update);
 router.delete('/:id', protect, authorize('admin'), subCategories.remove);
 router.get('/:id/products', protect, authorize('admin', 'staff'), subCategories.listProducts);
+router.patch('/:id/products', protect, authorize('admin', 'staff'), subCategories.setAlsoInCategory);
 router.post('/:id/products', protect, authorize('admin', 'staff'), subCategories.addProducts);
 router.delete('/:id/products/:productId', protect, authorize('admin', 'staff'), subCategories.removeProduct);
 

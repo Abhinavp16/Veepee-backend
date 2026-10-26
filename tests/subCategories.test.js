@@ -107,10 +107,38 @@ async function run() {
     console.log('3. Cutters › Blades and Saws › Blades list only their own products');
 
     // 4. The category page: its own products plus its sub-categories'.
-    assert.deepStrictEqual(await names(`categorySlug=${cutterSlug}`), [machine.name, blade.name, universal.name].sort());
+    // Added to a sub-category: shown only there by default.
+    assert.deepStrictEqual(await names(`categorySlug=${cutterSlug}`), [machine.name]);
     res = await call('GET', `/sub-categories?category=${cutterSlug}`);
     assert.deepStrictEqual(res.json.data.map((s) => [s.slug, s.productCount]), [[blades.slug, 2]]);
-    console.log('4. category page: all its products, and its sub-category cards with counts');
+    console.log('4. category page: its own products (sub-category ones only under their card), and the cards with counts');
+
+    // 4b. Where each product shows: admin sees it and switches it.
+    res = await call('GET', `/admin/products?search=${encodeURIComponent(suffix)}&limit=50`, token);
+    const stateOf = (name) => res.json.data.find((p) => p.name === name)?.placementState;
+    assert.strictEqual(stateOf(machine.name), 'category');
+    assert.strictEqual(stateOf(blade.name), 'sub');
+    const bladeRow = res.json.data.find((p) => p.name === blade.name);
+    assert.deepStrictEqual(bladeRow.subPlacements.map((p) => [p.categoryName, p.subCategoryName, p.alsoInCategory]), [[cutter.name, blades.name, false]]);
+    res = await call('PATCH', `/sub-categories/${blades._id}/products`, token, { categoryId: String(cutter._id), productIds: [String(blade._id)], alsoInCategory: true });
+    assert.strictEqual(res.json.data.updated, 1);
+    assert.deepStrictEqual(await names(`categorySlug=${cutterSlug}`), [machine.name, blade.name].sort(), 'both: in the category list too');
+    assert.deepStrictEqual(await names(`categorySlug=${cutterSlug}&subCategory=${blades.slug}`), [blade.name, universal.name].sort(), 'still under the card');
+    res = await call('GET', `/admin/products?search=${encodeURIComponent(suffix)}&placement=both&limit=50`, token);
+    assert.deepStrictEqual(res.json.data.map((p) => p.name), [blade.name], 'filter: both');
+    res = await call('GET', `/admin/products?search=${encodeURIComponent(suffix)}&placement=sub&limit=50`, token);
+    assert.deepStrictEqual(res.json.data.map((p) => p.name).sort(), [chain.name, universal.name].sort(), 'filter: sub-category only');
+    res = await call('GET', `/sub-categories/${blades._id}/products?categoryId=${cutter._id}`, token);
+    assert.deepStrictEqual(res.json.data.map((p) => [p.name, p.alsoInCategory]).sort(), [[blade.name, true], [universal.name, false]].sort());
+    // Adding with "also keep in the category list".
+    const extra = await product('Spare Blade', oxon, cutter._id);
+    res = await call('POST', `/sub-categories/${blades._id}/products`, token, { categoryId: String(cutter._id), productIds: [String(extra._id)], alsoInCategory: true });
+    assert.ok((await names(`categorySlug=${cutterSlug}`)).includes(extra.name));
+    // Taking it out of the sub-category leaves it in the category.
+    res = await call('DELETE', `/sub-categories/${blades._id}/products/${universal._id}?categoryId=${cutter._id}`, token);
+    assert.ok((await names(`categorySlug=${cutterSlug}`)).includes(universal.name), 'removed from the card: back in the category list');
+    await call('POST', `/sub-categories/${blades._id}/products`, token, { categoryId: String(cutter._id), productIds: [String(universal._id)] });
+    console.log('4b. admin sees Both / Sub only / Category only, filters and switches it');
 
     // 5. Brand at each step.
     res = await call('GET', `/categories?parent=root&active=true&brand=${encodeURIComponent(other.name)}&limit=50`);

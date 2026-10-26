@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const sharp = require('sharp');
+const { toStoredWebp } = require('../utils/imageProcessing');
 const { User, RefreshToken, DeviceToken } = require('../models');
 const { getStorage } = require('../config/firebase');
 const { UnauthorizedError, ConflictError, BadRequestError, ForbiddenError } = require('../utils/errors');
@@ -591,7 +591,7 @@ exports.uploadProfileAvatar = async (req, res, next) => {
       });
     }
 
-    const webpBuffer = await sharp(req.file.buffer).webp({ quality: 80 }).toBuffer();
+    const webpBuffer = await toStoredWebp(req.file.buffer);
     const filename = `avatars/${req.user._id}/${uuidv4()}.webp`;
     const fileUpload = bucket.file(filename);
 
@@ -662,7 +662,7 @@ exports.convertToWholesaler = async (req, res, next) => {
       if (bucket) {
         proofImageUrls = await Promise.all(
           req.files.map(async (file) => {
-            const webpBuffer = await sharp(file.buffer).webp({ quality: 80 }).toBuffer();
+            const webpBuffer = await toStoredWebp(file.buffer);
             const filename = `proofs/${user._id}/${uuidv4()}.webp`;
             const fileUpload = bucket.file(filename);
 

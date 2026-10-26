@@ -1,17 +1,13 @@
 const { getStorage } = require('../config/firebase');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const sharp = require('sharp');
+const { toStoredWebp } = require('../utils/imageProcessing');
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-// Convert image buffer to WebP using sharp
-async function convertToWebP(buffer, quality = 80) {
-  return sharp(buffer)
-    .webp({ quality })
-    .toBuffer();
-}
+// Upright, at most 1600px on the longest side, WebP.
+const convertToWebP = (buffer) => toStoredWebp(buffer);
 
 exports.uploadImage = async (req, res, next) => {
   try {

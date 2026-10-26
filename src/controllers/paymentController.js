@@ -1,4 +1,5 @@
 const { assertOrderConfirmed } = require('../services/orderConfirmationService');
+const { toStoredWebp } = require('../utils/imageProcessing');
 const { notifyTeam } = require('../services/adminNotificationService');
 const { Payment, Order, Settings } = require('../models');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
@@ -63,14 +64,26 @@ exports.uploadScreenshot = async (req, res, next) => {
       throw new BadRequestError('Storage not configured', 'STORAGE_NOT_CONFIGURED');
     }
 
-    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    // Stored as WebP like every other upload (upright, at most 1600px); a
+    // file that can't be converted is kept as it is, so a payment proof is
+    // never lost.
+    let body = req.file.buffer;
+    let contentType = req.file.mimetype;
+    let ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    try {
+      body = await toStoredWebp(req.file.buffer, { quality: 85 });
+      contentType = 'image/webp';
+      ext = 'webp';
+    } catch (_) {
+      // Keep the original.
+    }
     const filename = `payments/${orderId}_${uuidv4()}.${ext}`;
     const fileUpload = bucket.file(filename);
 
     await new Promise((resolve, reject) => {
       const stream = fileUpload.createWriteStream({
         metadata: {
-          contentType: req.file.mimetype,
+          contentType,
           metadata: {
             orderId,
             uploadedBy: req.user._id.toString(),
@@ -80,7 +93,7 @@ exports.uploadScreenshot = async (req, res, next) => {
       });
       stream.on('error', reject);
       stream.on('finish', resolve);
-      stream.end(req.file.buffer);
+      stream.end(body);
     });
 
     await fileUpload.makePublic();

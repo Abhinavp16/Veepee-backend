@@ -10,6 +10,7 @@ const { updateProductCount } = require('../categoryController');
 const { notifyLaunchAlerts } = require('../../services/productLaunchService');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
+const { toStoredWebp } = require('../../utils/imageProcessing');
 const slugify = require('slugify');
 const { encode } = require('blurhash');
 const {
@@ -30,7 +31,7 @@ async function uploadFilesToFirebase(files, folder = 'products') {
   const results = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    const webpBuffer = await sharp(file.buffer).webp({ quality: 80 }).toBuffer();
+    const webpBuffer = await toStoredWebp(file.buffer);
     const filename = `${folder}/${uuidv4()}.webp`;
     const fileUpload = bucket.file(filename);
 
@@ -53,6 +54,7 @@ async function uploadFilesToFirebase(files, folder = 'products') {
     let blurHash = null;
     try {
       const { data: pixels, info: { width, height } } = await sharp(file.buffer)
+        .rotate()
         .raw()
         .ensureAlpha()
         .resize(32, 32, { fit: 'inside' })

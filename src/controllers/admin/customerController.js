@@ -88,6 +88,8 @@ exports.getCustomerById = async (req, res, next) => {
       success: true,
       data: {
         ...customer,
+        openNegotiations: (negotiationStats.find((n) => n._id === 'pending')?.count || 0)
+          + (negotiationStats.find((n) => n._id === 'countered')?.count || 0),
         stats: {
           orders: orderStats[0] ? { totalOrders: orderStats[0].totalOrders, totalSpent: orderStats[0].totalSpent } : { totalOrders: 0, totalSpent: 0 },
           negotiations: negotiationStats.reduce((acc, n) => {
@@ -97,6 +99,85 @@ exports.getCustomerById = async (req, res, next) => {
         },
         recentOrders,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const OPEN_NEGOTIATION = ['pending', 'countered'];
+
+/**
+ * PUT /admin/customers/:id/account-type — switch a wholesaler back to a
+ * customer, or make a customer a wholesaler without an application. Prices
+ * follow at once (the role is read on every request); orders and open
+ * negotiations are left as they are, and the open ones are counted for admin.
+ */
+exports.updateCustomerAccountType = async (req, res, next) => {
+  try {
+    const { accountType } = req.body;
+    const reason = String(req.body.reason || '').trim() || null;
+    const shared = Boolean(req.body.showReasonToCustomer && reason);
+
+    const customer = await User.findOne({ _id: req.params.id, ...customerQuery });
+    if (!customer) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+
+    const from = customer.role;
+    const now = new Date();
+    if (!customer.businessInfo) customer.businessInfo = {};
+    const info = customer.businessInfo;
+
+    if (accountType === 'customer') {
+      if (from !== USER_ROLES.WHOLESALER) {
+        throw new BadRequestError('This account is already a customer', 'NOT_A_WHOLESALER');
+      }
+      customer.role = USER_ROLES.BUYER;
+      // Business details and documents stay, for when they apply again.
+      info.status = 'removed';
+      info.verified = false;
+      info.removedAt = now;
+      info.removalReason = reason;
+      info.removalReasonShared = shared;
+    } else {
+      if (from !== USER_ROLES.BUYER) {
+        throw new BadRequestError('This account is already a wholesaler', 'ALREADY_WHOLESALER');
+      }
+      customer.role = USER_ROLES.WHOLESALER;
+      info.status = 'accepted';
+      info.verified = true;
+      info.verifiedAt = now;
+    }
+
+    const openNegotiations = await Negotiation.countDocuments({
+      wholesalerId: customer._id,
+      status: { $in: OPEN_NEGOTIATION },
+    });
+    customer.accountTypeHistory.push({
+      from,
+      to: customer.role,
+      at: now,
+      by: req.user._id,
+      byName: req.user.name || '',
+      reason,
+      reasonShared: shared,
+      openNegotiations,
+    });
+    await customer.save();
+
+    const template = accountType === 'customer'
+      ? (shared ? 'accountSwitchedToCustomerReason' : 'accountSwitchedToCustomer')
+      : 'accountSwitchedToWholesaler';
+    notificationService
+      .sendLocalizedToUser(customer._id, template, { reason }, { type: 'account_update', event: 'ROLE_UPDATED', role: customer.role })
+      .catch((error) => console.error('Account type notification failed:', error.message));
+
+    const plain = customer.toObject();
+    delete plain.fcmTokens;
+    delete plain.passwordHash;
+    res.json({
+      success: true,
+      message: accountType === 'customer' ? 'Switched to a customer account' : 'Switched to a wholesaler account',
+      data: { ...plain, openNegotiations },
     });
   } catch (error) {
     next(error);

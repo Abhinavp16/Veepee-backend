@@ -504,6 +504,12 @@ const adminValidation = {
     action: Joi.string().valid('accept', 'reject').required(),
   }),
 
+  updateCustomerAccountType: Joi.object({
+    accountType: Joi.string().valid('customer', 'wholesaler').required(),
+    reason: Joi.string().trim().allow('', null).max(300),
+    showReasonToCustomer: Joi.boolean().default(false),
+  }),
+
   counterRequirement: Joi.object({
     counters: Joi.array().items(Joi.object({
       negotiationId: objectId.required(),

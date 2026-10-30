@@ -66,6 +66,12 @@ const sanitizeUser = (user) => {
   const userObj = user.toObject ? user.toObject() : { ...user };
   delete userObj.passwordHash;
   delete userObj.__v;
+  // Admin's notes on account switches stay with admin; a removal reason
+  // reaches the customer only when admin chose to share it.
+  delete userObj.accountTypeHistory;
+  if (userObj.businessInfo && !userObj.businessInfo.removalReasonShared) {
+    userObj.businessInfo = { ...userObj.businessInfo, removalReason: null };
+  }
   return userObj;
 };
 

@@ -113,6 +113,7 @@ router.put('/payments/:id/reject', administrator, validate(adminValidation.rejec
 router.get('/customers', operationsStaff, adminCustomerController.getCustomers);
 router.get('/customers/:id', operationsStaff, adminCustomerController.getCustomerById);
 router.put('/customers/:id/upgrade', administrator, validate(adminValidation.upgradeCustomer), adminCustomerController.upgradeCustomer);
+router.put('/customers/:id/account-type', administrator, validate(adminValidation.updateCustomerAccountType), adminCustomerController.updateCustomerAccountType);
 router.post('/customers/notifications', administrator, validate(adminValidation.sendNotification), adminCustomerController.sendNotification);
 
 // The summary is sufficient for operational context; all other analytics remain Administrator-only.

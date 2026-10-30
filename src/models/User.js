@@ -82,13 +82,32 @@ const userSchema = new mongoose.Schema({
     contactPerson: { type: String, default: null },
     status: { 
       type: String, 
-      enum: ['none', 'pending', 'accepted', 'rejected'], 
+      // removed: admin switched a wholesaler back to a customer.
+      enum: ['none', 'pending', 'accepted', 'rejected', 'removed'], 
       default: 'none' 
     },
     verified: { type: Boolean, default: false },
     verifiedAt: { type: Date, default: null },
     proofImages: [{ type: String }],
+    // Set when admin switches a wholesaler back to a customer. The reason
+    // reaches the customer only when removalReasonShared is true.
+    removedAt: { type: Date, default: null },
+    removalReason: { type: String, default: null },
+    removalReasonShared: { type: Boolean, default: false },
   },
+
+  // Every admin switch between customer and wholesaler (admin only).
+  accountTypeHistory: [{
+    _id: false,
+    from: { type: String, enum: ['buyer', 'wholesaler'] },
+    to: { type: String, enum: ['buyer', 'wholesaler'] },
+    at: { type: Date, default: Date.now },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    byName: { type: String, default: '' },
+    reason: { type: String, default: null },
+    reasonShared: { type: Boolean, default: false },
+    openNegotiations: { type: Number, default: 0 },
+  }],
 
   fcmTokens: [{
     type: String,

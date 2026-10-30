@@ -119,6 +119,18 @@ const TEMPLATES = {
     en: { title: 'Negotiation Update', body: '{message}' },
     hi: { title: 'मोलभाव अपडेट', body: '{message}' },
   },
+  accountSwitchedToCustomer: {
+    en: { title: 'Your account is now a customer account', body: 'You now see customer prices. You can apply for a wholesaler account again from your profile.' },
+    hi: { title: 'आपका खाता अब ग्राहक खाता है', body: 'अब आपको ग्राहक कीमतें दिखेंगी। आप अपनी प्रोफ़ाइल से फिर से थोक खाते के लिए आवेदन कर सकते हैं।' },
+  },
+  accountSwitchedToCustomerReason: {
+    en: { title: 'Your account is now a customer account', body: 'Reason: {reason}. You now see customer prices and can apply again from your profile.' },
+    hi: { title: 'आपका खाता अब ग्राहक खाता है', body: 'कारण: {reason}। अब आपको ग्राहक कीमतें दिखेंगी, और आप अपनी प्रोफ़ाइल से फिर से आवेदन कर सकते हैं।' },
+  },
+  accountSwitchedToWholesaler: {
+    en: { title: 'You are now a wholesaler', body: 'Your account now shows wholesale prices and bulk negotiation.' },
+    hi: { title: 'अब आप थोक विक्रेता हैं', body: 'आपके खाते में अब थोक कीमतें और थोक मोलभाव दिखेंगे।' },
+  },
 };
 
 const SUPPORTED_LANGUAGES = ['en', 'hi'];

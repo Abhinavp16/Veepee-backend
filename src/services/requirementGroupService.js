@@ -9,6 +9,7 @@ const { assertPurchasable } = require('../utils/productAvailability');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
 const notificationService = require('./notificationService');
 const { notifyTeam } = require('./adminNotificationService');
+const { assertNegotiablePrice } = require('../utils/negotiationRules');
 
 const { PENDING, COUNTERED, ACCEPTED, REJECTED, EXPIRED, CONVERTED } = NEGOTIATION_STATUS;
 
@@ -59,6 +60,7 @@ const createRequirementFromCart = async ({ user, message, offers = [] }) => {
   const byId = new Map(products.map((p) => [String(p._id), p]));
   const ctx = await loadDiscountContext(products, { sales: false }); // never sale prices
   const offerFor = new Map(offers.map((o) => [String(o.productId), o.pricePerUnit]));
+  const settings = await Settings.getSettings();
 
   const lines = [];
   const issues = [];
@@ -75,6 +77,8 @@ const createRequirementFromCart = async ({ user, message, offers = [] }) => {
         throw new BadRequestError(`Only ${product.stock} of ${product.name} available`, 'INSUFFICIENT_STOCK');
       }
       const standardPrice = priceFor(product, USER_ROLES.WHOLESALER, ctx).price;
+      const asked = offerFor.get(String(product._id));
+      if (asked != null) assertNegotiablePrice(asked, standardPrice, settings, product.name);
       lines.push({ product, quantity: item.quantity, pricePerUnit: offerFor.get(String(product._id)) ?? standardPrice, standardPrice });
     } catch (error) {
       issues.push({
@@ -91,7 +95,6 @@ const createRequirementFromCart = async ({ user, message, offers = [] }) => {
     throw error;
   }
 
-  const settings = await Settings.getSettings();
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + settings.negotiationExpiryDays);
   const requestGroup = lines.length > 1 ? { id: uuidv4(), number: generateRequirementNumber() } : undefined;

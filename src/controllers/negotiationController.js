@@ -7,6 +7,7 @@ const { assertPurchasable } = require('../utils/productAvailability');
 const { assertQuantityAllowed } = require('../utils/quantityRules');
 const { notifyTeam } = require('../services/adminNotificationService');
 const requirementService = require('../services/requirementGroupService');
+const { assertNegotiablePrice } = require('../utils/negotiationRules');
 
 exports.getMyNegotiations = async (req, res, next) => {
   try {
@@ -75,6 +76,8 @@ exports.createNegotiation = async (req, res, next) => {
     const ctx = await loadDiscountContext([product], { sales: false }); // never sale prices
 
     const settings = await Settings.getSettings();
+    const standardPrice = priceFor(product, USER_ROLES.WHOLESALER, ctx).price;
+    assertNegotiablePrice(pricePerUnit, standardPrice, settings);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + settings.negotiationExpiryDays);
 
@@ -85,7 +88,7 @@ exports.createNegotiation = async (req, res, next) => {
       productId,
       productSnapshot: {
         name: product.name,
-        price: priceFor(product, USER_ROLES.WHOLESALER, ctx).price,
+        price: standardPrice,
         image: product.primaryImage,
         sku: product.sku,
       },
@@ -174,6 +177,7 @@ exports.counterOffer = async (req, res, next) => {
     if (negotiation.currentOfferBy !== 'admin') {
       throw new BadRequestError('Waiting for admin response', 'WAITING_FOR_ADMIN');
     }
+    assertNegotiablePrice(pricePerUnit, negotiation.productSnapshot?.price, await Settings.getSettings());
 
     const totalPrice = negotiation.requestedQuantity * pricePerUnit;
 

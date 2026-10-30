@@ -14,6 +14,7 @@ const {
 const { loadDiscountContext, pricingForUser, pendingPriceNotice } = require('../services/productPricingService');
 const { shopperRole } = require('../services/guestPricing');
 const { quantityRules } = require('../utils/quantityRules');
+const { negotiationRulesFor } = require('../utils/negotiationRules');
 const {
   isComingSoon,
   comingSoonFilter,
@@ -309,6 +310,12 @@ exports.getProductBySlug = async (req, res, next) => {
       responseData.notifyMe = Boolean(
         await ProductAlert.exists({ userId: req.user._id, productId: product._id })
       );
+    }
+
+    // The quick picks and lowest price for a wholesaler's bulk negotiation.
+    if (userRole === 'wholesaler') {
+      const { Settings } = require('../models');
+      responseData.negotiationRules = negotiationRulesFor(await Settings.getSettings());
     }
 
     // Remove raw price fields for non-admin users, but keep for wholesalers so they can see customer price

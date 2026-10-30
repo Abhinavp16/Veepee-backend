@@ -113,7 +113,7 @@ async function run() {
     assert.strictEqual((await Cart.findOne({ userId: wholesaler.user._id })).items.length, 3, 'the cart is untouched');
 
     await fillCart(wholesaler.user, [[pump, 10], [hose, 24], [nozzle, 5]]);
-    res = await call('POST', '/negotiations/from-cart', { token: wholesaler.token, body: { message: 'Need these for the season', offers: [{ productId: String(nozzle._id), pricePerUnit: 600 }] } });
+    res = await call('POST', '/negotiations/from-cart', { token: wholesaler.token, body: { message: 'Need these for the season', offers: [{ productId: String(nozzle._id), pricePerUnit: 640 }] } });
     assert.strictEqual(res.status, 201, JSON.stringify(res.json));
     const { id: groupId, number } = res.json.data.requestGroup;
     assert.ok(/^REQ-\d+$/.test(number));
@@ -121,7 +121,7 @@ async function run() {
     const lines = await Negotiation.find({ 'requestGroup.id': groupId }).sort({ createdAt: 1 });
     assert.strictEqual(lines.length, 3);
     assert.strictEqual(lines[0].requestedPricePerUnit, 700, 'asked at the current wholesale price');
-    assert.strictEqual(lines[2].requestedPricePerUnit, 600, 'or the wholesaler\'s own price');
+    assert.strictEqual(lines[2].requestedPricePerUnit, 640, 'or the wholesaler\'s own price');
     assert.strictEqual((await Cart.findOne({ userId: wholesaler.user._id })).items.length, 0, 'the cart is emptied');
     assert.strictEqual(await AdminNotification.countDocuments({ type: 'new_negotiation', 'data.requirementNumber': number }), 1, 'the team hears about it once');
 
@@ -142,7 +142,7 @@ async function run() {
     assert.strictEqual(res.json.data.status, 'pending');
     assert.strictEqual(res.json.data.productCount, 3);
     assert.strictEqual(res.json.data.items.length, 3);
-    assert.strictEqual(res.json.data.totalPrice, 10 * 700 + 24 * 700 + 5 * 600);
+    assert.strictEqual(res.json.data.totalPrice, 10 * 700 + 24 * 700 + 5 * 640);
     res = await call('GET', `/negotiations/groups/${groupId}`, { token: other.token });
     assert.strictEqual(res.status, 404, 'someone else\'s requirement is not visible');
 
@@ -181,7 +181,7 @@ async function run() {
     assert.strictEqual(res.status, 200, JSON.stringify(res.json));
     assert.strictEqual(res.json.data.status, 'accepted');
     assert.strictEqual(res.json.data.canPay, true);
-    assert.strictEqual(res.json.data.totalPrice, 10 * 650 + 24 * 680 + 5 * 600);
+    assert.strictEqual(res.json.data.totalPrice, 10 * 650 + 24 * 680 + 5 * 640);
 
     // --- ONE order for the whole requirement ------------------------------------
     res = await call('POST', '/orders/from-group', { token: other.token, body: { groupId, shippingAddress: address } });
@@ -198,8 +198,8 @@ async function run() {
     assert.strictEqual(order.negotiationIds.length, 3);
     assert.strictEqual(order.negotiationId, null);
     assert.strictEqual(order.orderType, 'wholesale');
-    assert.strictEqual(order.subtotal, 10 * 650 + 24 * 680 + 5 * 600);
-    assert.deepStrictEqual(order.items.map((i) => i.pricePerUnit), [650, 680, 600]);
+    assert.strictEqual(order.subtotal, 10 * 650 + 24 * 680 + 5 * 640);
+    assert.deepStrictEqual(order.items.map((i) => i.pricePerUnit), [650, 680, 640]);
     assert.ok(await Payment.findOne({ orderId: order._id }), 'one payment for the order');
     assert.strictEqual(await Payment.countDocuments({ orderId: order._id }), 1);
     const settled = await Negotiation.find({ 'requestGroup.id': groupId });

@@ -82,7 +82,7 @@ async function run() {
     await notifyTeam({ type: 'payment_uploaded', title: 'Payment to verify', body: 'x', link: '/orders', data: { orderId } });
 
     // Wholesaler negotiation.
-    res = await call('POST', '/negotiations', { token: wholesaler.token, body: { productId: String(product._id), quantity: 5, pricePerUnit: 60 } });
+    res = await call('POST', '/negotiations', { token: wholesaler.token, body: { productId: String(product._id), quantity: 5, pricePerUnit: 65 } });
     assert.strictEqual(res.status, 201, JSON.stringify(res.json));
     await waitFor(async () => (await AdminNotification.countDocuments({ type: 'new_negotiation' })) === 1);
 

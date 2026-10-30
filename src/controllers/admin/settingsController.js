@@ -1,5 +1,6 @@
 const { Settings } = require('../../models');
 const { forgetGuestPricing } = require('../../services/guestPricing');
+const { normalizeQuickPicks } = require('../../utils/negotiationRules');
 
 // Leftover Razorpay fields are never sent (the gateway was removed).
 const withoutRazorpay = (settings) => {
@@ -42,6 +43,8 @@ exports.updateSettings = async (req, res, next) => {
       'minOrderAmount',
       'defaultBulkMinQuantity',
       'negotiationExpiryDays',
+      'negotiationQuickPicks',
+      'negotiationMaxDiscountPercent',
       'lowStockThreshold',
       'features',
       'mobileApp',
@@ -61,6 +64,9 @@ exports.updateSettings = async (req, res, next) => {
         // Merge, so saving one switch never resets the others.
         const current = settings.features?.toObject?.() || settings.features || {};
         settings.features = { ...current, ...req.body.features };
+      } else if (field === 'negotiationQuickPicks') {
+        // Distinct, largest first, at most four.
+        settings.negotiationQuickPicks = normalizeQuickPicks(req.body.negotiationQuickPicks);
       } else {
         settings[field] = req.body[field];
       }

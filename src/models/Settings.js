@@ -53,6 +53,18 @@ const settingsSchema = new mongoose.Schema({
     type: Number,
     default: 7,
   },
+  // Bulk negotiation: the "2% off" quick picks on the app's price step, and
+  // the most a wholesaler may ask off the normal wholesale price.
+  negotiationQuickPicks: {
+    type: [Number],
+    default: [2, 1],
+  },
+  negotiationMaxDiscountPercent: {
+    type: Number,
+    default: 10,
+    min: 1,
+    max: 90,
+  },
   lowStockThreshold: {
     type: Number,
     default: 5,

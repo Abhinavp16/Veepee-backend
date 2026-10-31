@@ -153,6 +153,9 @@ router.delete('/affiliate-codes/:id', administrator, adminAffiliateController.de
 router.patch('/affiliate-codes/:id/toggle', administrator, adminAffiliateController.toggleAffiliateCodeStatus);
 router.get('/affiliate-codes/:id/usage', administrator, adminAffiliateController.getAffiliateCodeUsage);
 router.get('/affiliate-codes/:id/commissions', administrator, adminAffiliateController.getAffiliateCodeCommissions);
+router.get('/affiliate-summary', administrator, adminAffiliateController.getAffiliateSummary);
+router.get('/affiliate-commissions/export', administrator, adminAffiliateController.exportAffiliateCommissions);
+router.post('/affiliate-commissions/pay', administrator, validate(adminValidation.payAffiliateCommissions), adminAffiliateController.markCommissionsPaid);
 router.get('/affiliate-commissions', administrator, adminAffiliateController.getAffiliateCommissions);
 
 router.get('/reviews', administrator, adminReviewController.getAllReviews);

@@ -54,6 +54,12 @@ const affiliateCodeSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    // Uses per customer; 0 = no limit.
+    perCustomerLimit: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
     totalDiscountGenerated: {
         type: Number,
         default: 0,

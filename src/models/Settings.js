@@ -84,12 +84,22 @@ const settingsSchema = new mongoose.Schema({
   },
 
   heroBanners: [{
-    title: { type: String, required: true },
+    // Video banners show no text, so the title may be empty.
+    title: { type: String, default: '' },
     subtitle: String,
     tag: String,
+    // For a video banner: the poster shown until the video plays.
     imageUrl: String,
+    mediaType: {
+      type: String,
+      enum: ['image', 'video_upload', 'youtube'],
+      default: 'image',
+    },
+    // An uploaded MP4 (video_upload) or a YouTube link (youtube).
+    videoUrl: { type: String, default: '' },
     linkUrl: String,
-    buttonText: { type: String, default: 'Shop Now' },
+    // Empty: no button on the banner.
+    buttonText: { type: String, default: '' },
     buttonIcon: { type: String, default: 'ArrowRight' },
     isActive: { type: Boolean, default: true },
     order: { type: Number, default: 0 },
@@ -101,7 +111,8 @@ const settingsSchema = new mongoose.Schema({
     tag: String,
     imageUrl: String,
     linkUrl: String,
-    buttonText: { type: String, default: 'Shop Now' },
+    // Empty: no button on the banner.
+    buttonText: { type: String, default: '' },
     buttonIcon: { type: String, default: 'ArrowRight' },
     isActive: { type: Boolean, default: true },
     order: { type: Number, default: 0 },

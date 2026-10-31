@@ -476,6 +476,8 @@ async function releaseUnpaidSaleOrders(now = new Date()) {
     if (!updated) continue;
     cancelled += 1;
     await giveBackSaleUnits(updated.items, { userId: updated.userId });
+    await require('./affiliateCommissionService').reverseAffiliateForOrder(updated._id, 'Not paid in time')
+      .catch((error) => console.error(`Affiliate reversal failed for ${updated._id}:`, error.message));
     try {
       await notificationService.sendLocalizedToUser(
         updated.userId,

@@ -63,6 +63,7 @@ const { isReceiptAvailable, sendOrderReceipt } = require('../utils/orderReceiptP
 const { assertQuantityAllowed } = require('../utils/quantityRules');
 const { notifyTeam } = require('../services/adminNotificationService');
 const { loadGroup, summarizeGroup } = require('../services/requirementGroupService');
+const { reserveAffiliateUse, releaseAffiliateUse } = require('../services/affiliateCommissionService');
 
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
@@ -141,7 +142,7 @@ const validateAffiliateCandidate = (affiliate) => {
   }
 };
 
-const resolveCouponDiscount = async ({ couponCode, subtotal, userRole }) => {
+const resolveCouponDiscount = async ({ couponCode, subtotal, userRole, userId = null }) => {
   if (!couponCode || !couponCode.trim()) {
     return {
       discountSource: null,
@@ -159,6 +160,18 @@ const resolveCouponDiscount = async ({ couponCode, subtotal, userRole }) => {
   const affiliate = await AffiliateCode.findOne({ code: normalizedCode });
   if (affiliate) {
     validateAffiliateCandidate(affiliate);
+
+    // Uses per customer, when admin set a limit (cancelled orders don't count).
+    if (userId && affiliate.perCustomerLimit > 0) {
+      const used = await Order.countDocuments({
+        userId,
+        status: { $ne: ORDER_STATUS.CANCELLED },
+        $or: [{ affiliateCodeId: affiliate._id }, { affiliateCode: affiliate.code }],
+      });
+      if (used >= affiliate.perCustomerLimit) {
+        throw new BadRequestError('You have already used this code', 'COUPON_ALREADY_USED');
+      }
+    }
 
     const { matchedRule, minRequired } = pickDiscountRule(subtotal, affiliate.discountRules, {
       minPurchaseAmount: 0,
@@ -358,6 +371,7 @@ exports.previewCouponForCart = async (req, res, next) => {
       couponCode,
       subtotal: couponSubtotal,
       userRole: req.user.role,
+      userId: req.user._id,
     });
 
     // Delivery is added by the shop when it confirms the order.
@@ -613,11 +627,13 @@ exports.createOrderFromCart = async (req, res, next) => {
       discountSource,
       offerCode,
       affiliateCode: resolvedAffiliateCode,
+      affiliateMeta,
       discount,
     } = await resolveCouponDiscount({
       couponCode: inputCode,
       subtotal: couponSubtotalOf(orderItems),
       userRole: req.user.role,
+      userId: req.user._id,
     });
     // Delivery is added by the shop when it confirms the order.
     const deliveryFee = 0;
@@ -643,6 +659,11 @@ exports.createOrderFromCart = async (req, res, next) => {
         reason: error.code === SALE_LIMIT_REACHED ? 'sale_limit' : 'sale_sold_out',
       }]);
     }
+
+    // The code's use is taken before the order is saved (given back if it
+    // isn't), so the last use can't go to two orders at once.
+    const affiliateCodeId = discountSource === 'affiliate' ? affiliateMeta?.id : null;
+    if (affiliateCodeId) await reserveAffiliateUse(affiliateCodeId);
 
     let order;
     try {
@@ -672,11 +693,13 @@ exports.createOrderFromCart = async (req, res, next) => {
           note: 'Order placed; awaiting confirmation and delivery charge',
         }],
         affiliateCode: resolvedAffiliateCode,
+        affiliateCodeId,
         offerCode,
       });
     } catch (error) {
-      // Not recorded: the sale units go back.
+      // Not recorded: the sale units and the code's use go back.
       await giveBackSaleUnits(orderItems, { userId: req.user._id });
+      if (affiliateCodeId) await releaseAffiliateUse(affiliateCodeId);
       // The same checkout arrived twice at once and the other one won.
       if (isDuplicateKeyError(error) && await respondWithExistingOrder(res, req.user._id, idempotencyKey)) return;
       throw error;
@@ -685,11 +708,6 @@ exports.createOrderFromCart = async (req, res, next) => {
     if (discountSource === 'offer' && offerCode) {
       await Offer.findOneAndUpdate(
         { code: offerCode },
-        { $inc: { usageCount: 1 } }
-      );
-    } else if (discountSource === 'affiliate' && resolvedAffiliateCode) {
-      await AffiliateCode.findOneAndUpdate(
-        { code: resolvedAffiliateCode },
         { $inc: { usageCount: 1 } }
       );
     }
@@ -796,10 +814,15 @@ const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddr
     discountSource,
     offerCode,
     affiliateCode: resolvedAffiliateCode,
+    affiliateMeta,
     discount,
-  } = await resolveCouponDiscount({ couponCode: inputCode, subtotal, userRole: user.role });
+  } = await resolveCouponDiscount({ couponCode: inputCode, subtotal, userRole: user.role, userId: user._id });
   const total = Math.max(subtotal - discount, 0);
   const isGroup = negotiations.length > 1;
+
+  // Taken before the order is saved, given back if it isn't.
+  const affiliateCodeId = discountSource === 'affiliate' ? affiliateMeta?.id : null;
+  if (affiliateCodeId) await reserveAffiliateUse(affiliateCodeId);
 
   const order = await Order.create({
     _id: orderId,
@@ -828,13 +851,15 @@ const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddr
       note: `${isGroup ? 'Order created from a requirement' : 'Order created from negotiation'}; awaiting confirmation and delivery charge`,
     }],
     affiliateCode: resolvedAffiliateCode,
+    affiliateCodeId,
     offerCode,
+  }).catch(async (error) => {
+    if (affiliateCodeId) await releaseAffiliateUse(affiliateCodeId);
+    throw error;
   });
 
   if (discountSource === 'offer' && offerCode) {
     await Offer.findOneAndUpdate({ code: offerCode }, { $inc: { usageCount: 1 } });
-  } else if (discountSource === 'affiliate' && resolvedAffiliateCode) {
-    await AffiliateCode.findOneAndUpdate({ code: resolvedAffiliateCode }, { $inc: { usageCount: 1 } });
   }
 
   for (const negotiation of negotiations) {

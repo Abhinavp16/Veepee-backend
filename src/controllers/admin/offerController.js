@@ -1,4 +1,11 @@
-const { Offer } = require('../../models');
+const { Offer, AffiliateCode } = require('../../models');
+
+// One code text means one thing at checkout (affiliate codes win a clash).
+const assertNotAffiliateCode = async (code) => {
+    if (code && await AffiliateCode.exists({ code: String(code).trim().toUpperCase() })) {
+        throw new BadRequestError('An affiliate code already uses this code', 'CODE_USED_BY_AFFILIATE');
+    }
+};
 const { NotFoundError, BadRequestError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 
@@ -89,6 +96,7 @@ exports.createOffer = async (req, res, next) => {
             }
         }
 
+        await assertNotAffiliateCode(offerData.code);
         const offer = await Offer.create(offerData);
 
         res.status(201).json({
@@ -123,6 +131,9 @@ exports.updateOffer = async (req, res, next) => {
             }
         }
 
+        if (updateData.code && String(updateData.code).toUpperCase() !== offer.code) {
+            await assertNotAffiliateCode(updateData.code);
+        }
         Object.assign(offer, updateData);
         await offer.save();
 

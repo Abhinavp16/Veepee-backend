@@ -6,6 +6,7 @@ const { ORDER_STATUS } = require('../../utils/constants');
 const notificationService = require('../../services/notificationService');
 const orderConfirmationService = require('../../services/orderConfirmationService');
 const { giveBackSaleUnits } = require('../../services/saleService');
+const { reverseAffiliateForOrder } = require('../../services/affiliateCommissionService');
 
 exports.getOrders = async (req, res, next) => {
   try {
@@ -181,6 +182,9 @@ exports.updateOrderStatus = async (req, res, next) => {
     // A cancelled order's sale units (and the buyer's per-person share) go back.
     if (status === ORDER_STATUS.CANCELLED) {
       await giveBackSaleUnits(order.items, { userId: order.userId });
+      // Its affiliate code's use goes back, and any commission is reversed.
+      await reverseAffiliateForOrder(order._id, 'Order cancelled by admin')
+        .catch((error) => console.error(`Affiliate reversal failed for ${order._id}:`, error.message));
     }
 
     try {

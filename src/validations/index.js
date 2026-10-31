@@ -607,10 +607,12 @@ const adminValidation = {
       showCustomerPriceToGuests: Joi.boolean(),
     }),
     heroBanners: Joi.array().items(Joi.object({
-      title: Joi.string().required(),
+      title: Joi.string().allow('', null),
       subtitle: Joi.string().allow('', null),
       tag: Joi.string().allow('', null),
       imageUrl: Joi.string().allow('', null),
+      mediaType: Joi.string().valid('image', 'video_upload', 'youtube'),
+      videoUrl: Joi.string().allow('', null).max(500),
       linkUrl: Joi.string().allow('', null),
       buttonText: Joi.string().allow('', null),
       buttonIcon: Joi.string().allow('', null),
@@ -738,6 +740,7 @@ const adminValidation = {
     discountValue: Joi.number().min(0).required(),
     discountRules: Joi.array().items(discountRuleSchema).default([]),
     usageLimit: Joi.number().integer().min(0).default(0),
+    perCustomerLimit: Joi.number().integer().min(0).default(0),
     startDate: Joi.date().iso().default(Date.now),
     endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
     isActive: Joi.boolean().default(true),
@@ -750,9 +753,16 @@ const adminValidation = {
     discountValue: Joi.number().min(0),
     discountRules: Joi.array().items(discountRuleSchema),
     usageLimit: Joi.number().integer().min(0),
+    perCustomerLimit: Joi.number().integer().min(0),
     startDate: Joi.date().iso(),
     endDate: Joi.date().iso().greater(Joi.ref('startDate')).allow('', null),
     isActive: Joi.boolean(),
+  }),
+
+  payAffiliateCommissions: Joi.object({
+    ids: Joi.array().items(Joi.string().hex().length(24)).min(1).max(500).required(),
+    reference: Joi.string().trim().allow('').max(120),
+    note: Joi.string().trim().allow('').max(300),
   }),
 
   sendNotification: Joi.object({

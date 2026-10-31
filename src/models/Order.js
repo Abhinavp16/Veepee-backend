@@ -208,6 +208,17 @@ const orderSchema = new mongoose.Schema({
     uppercase: true,
     default: null,
   },
+  // The code itself, so the order stays linked if the code changes.
+  affiliateCodeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AffiliateCode',
+    default: null,
+  },
+  // Set when a cancelled order gave its use of the code back.
+  affiliateUsageReleased: {
+    type: Boolean,
+    default: false,
+  },
   offerCode: {
     type: String,
     trim: true,

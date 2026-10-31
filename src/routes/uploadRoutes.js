@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const uploadController = require('../controllers/uploadController');
+const videoUploadController = require('../controllers/videoUploadController');
 const { protect, authorize } = require('../middlewares/auth');
 const { ForbiddenError } = require('../utils/errors');
 
@@ -25,6 +26,10 @@ const brandOrCategoryUpload = (req, res, next) => {
 };
 
 router.post('/image', protect, authorize('admin', 'staff'), brandOrCategoryUpload, upload.single('image'), uploadController.uploadImage);
+// Banner videos go from the admin's browser straight to storage (see
+// videoUploadController): open the upload, then publish it.
+router.post('/video/start', protect, authorize('admin'), videoUploadController.startVideoUpload);
+router.post('/video/finish', protect, authorize('admin'), videoUploadController.finishVideoUpload);
 router.post('/images', protect, authorize('admin'), upload.array('images', 10), uploadController.uploadMultipleImages);
 router.delete('/image', protect, authorize('admin'), uploadController.deleteImage);
 

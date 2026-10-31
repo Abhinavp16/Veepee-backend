@@ -15,6 +15,7 @@ const { loadDiscountContext, pricingForUser, pendingPriceNotice } = require('../
 const { shopperRole } = require('../services/guestPricing');
 const { quantityRules } = require('../utils/quantityRules');
 const { negotiationRulesFor } = require('../utils/negotiationRules');
+const { rankProducts } = require('../services/productSearch');
 const {
   isComingSoon,
   comingSoonFilter,
@@ -467,48 +468,11 @@ exports.searchProducts = async (req, res, next) => {
     const { q, category, categorySlug, brand } = req.query;
     const { page, limit, skip } = paginate(req.query.page, req.query.limit);
     const userRole = shopperRole(req);
+    const search = String(q || '').trim();
 
-    console.log('Search request - q:', q, 'category:', category, 'brand:', brand);
-
-    // Build base query
-    const query = { status: PRODUCT_STATUS.ACTIVE };
-
-    // Use $and if we have multiple major conditions (q, category, brand)
+    // Category, brand and coming-soon filters narrow the products first;
+    // the search words are then scored in code (services/productSearch).
     const andConditions = [];
-
-    // Search query condition
-    if (q && q.trim().length > 0) {
-      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const words = escaped.trim().split(/\s+/).filter(Boolean);
-      const regexPattern = words.map(w => `(?=.*${w})`).join('') + '.*';
-      const regex = new RegExp(regexPattern, 'i');
-      const matchingCategories = await Category.find({
-        isActive: true,
-        $or: [{ name: regex }, { slug: regex }],
-      }).select('_id slug').lean();
-      // "blade" also finds products placed under a "Blades" sub-category.
-      const matchingSubCategories = await SubCategory.find({
-        isActive: true,
-        $or: [{ name: regex }, { slug: regex }],
-      }).select('_id').lean();
-
-      andConditions.push({
-        $or: [
-          ...(matchingSubCategories.length > 0
-            ? [{ 'placements.subCategory': { $in: matchingSubCategories.map((sub) => sub._id) } }]
-            : []),
-          { name: regex },
-          { description: regex },
-          { shortDescription: regex },
-          { category: regex },
-          { tags: { $in: [new RegExp(escaped, 'i')] } },
-          { sku: regex },
-          ...(matchingCategories.length > 0 ? categoryProductCondition(matchingCategories).$or : []),
-        ]
-      });
-    }
-
-    // Category condition
     if (categorySlug) {
       const categories = await getCategoryAndDescendants(categorySlug);
       andConditions.push(categoryProductCondition(categories));
@@ -524,44 +488,56 @@ exports.searchProducts = async (req, res, next) => {
       if (categoryDocument) andConditions.push(categoryProductCondition(categoryDocument));
       else andConditions.push({ category: { $regex: escapeRegExp(normalized), $options: 'i' } });
     }
-    
-    // Brand condition (checks both product.brand and product.company)
     if (brand) {
-      const matchingCompanies = await Company.find({
-        name: { $regex: escapeRegExp(brand), $options: 'i' }
-      }).select('_id');
-      const companyIds = matchingCompanies.map(c => c._id);
-      
+      const companyIds = (await Company.find({
+        name: { $regex: escapeRegExp(brand), $options: 'i' },
+      }).select('_id').lean()).map((c) => c._id);
       andConditions.push({
         $or: [
           { brand: { $regex: escapeRegExp(brand), $options: 'i' } },
-          { company: { $in: companyIds } }
-        ]
+          { company: { $in: companyIds } },
+        ],
       });
     }
-
     const visibility = comingSoonListCondition(req.query, new Date());
     if (visibility) andConditions.push(visibility);
+    const query = { status: PRODUCT_STATUS.ACTIVE, ...(andConditions.length > 0 && { $and: andConditions }) };
+    const comingSoonLast = isTrue(req.query.includeComingSoon);
 
-    if (andConditions.length > 0) {
-      query.$and = andConditions;
+    let pageIds;
+    let total;
+    let correctedQuery = null;
+    if (search) {
+      const [candidates, categories, subCategories] = await Promise.all([
+        Product.find(query)
+          .select('name nameHindi sku brand company category categoryIds primaryCategoryId placements specifications tags shortDescription description comingSoon createdAt')
+          .populate('company', 'name')
+          .lean(),
+        Category.find({}).select('name').lean(),
+        SubCategory.find({ isActive: true }).select('name').lean(),
+      ]);
+      const ranked = rankProducts(candidates, search, {
+        categoryNames: new Map(categories.map((c) => [String(c._id), c.name])),
+        subCategoryNames: new Map(subCategories.map((c) => [String(c._id), c.name])),
+      }, { comingSoonLast });
+      correctedQuery = ranked.correctedQuery;
+      total = ranked.products.length;
+      pageIds = ranked.products.slice(skip, skip + limit).map((p) => p._id);
+    } else {
+      const sort = comingSoonLast ? { comingSoon: 1, createdAt: -1, _id: -1 } : { createdAt: -1, _id: -1 };
+      [pageIds, total] = await Promise.all([
+        Product.find(query).sort(sort).skip(skip).limit(limit).select('_id').lean().then((rows) => rows.map((r) => r._id)),
+        Product.countDocuments(query),
+      ]);
     }
 
-    console.log('Final search query:', JSON.stringify(query));
-
-    const [products, total] = await Promise.all([
-      Product.find(query)
-        .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew company ${SHOPPER_FIELDS}`)
-        .populate('company', 'name')
-        .populate(productCategoryPopulate)
-        .sort(isTrue(req.query.includeComingSoon)
-          ? { comingSoon: 1, createdAt: -1, _id: -1 }
-          : { createdAt: -1, _id: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Product.countDocuments(query),
-    ]);
+    const found = await Product.find({ _id: { $in: pageIds } })
+      .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isHot isNew company ${SHOPPER_FIELDS}`)
+      .populate('company', 'name')
+      .populate(productCategoryPopulate)
+      .lean();
+    const byId = new Map(found.map((p) => [String(p._id), p]));
+    const products = pageIds.map((id) => byId.get(String(id))).filter(Boolean);
 
     const ctx = await loadDiscountContext(products);
     const now = new Date();
@@ -588,6 +564,8 @@ exports.searchProducts = async (req, res, next) => {
     res.json({
       success: true,
       ...formatPaginationResponse(formattedProducts, total, page, limit),
+      // Nothing matched as typed: these are the results for this spelling.
+      ...(correctedQuery && { correctedQuery }),
     });
   } catch (error) {
     next(error);

@@ -705,7 +705,7 @@ exports.getRelatedProducts = async (req, res, next) => {
       productQuery.slug = id;
     }
 
-    const currentProduct = await Product.findOne(productQuery).select('category categoryIds _id').lean();
+    const currentProduct = await Product.findOne(productQuery).select('category categoryIds placements _id').lean();
     if (!currentProduct) return res.json({ success: true, data: [] });
 
     let relatedCategoryCondition;
@@ -721,9 +721,23 @@ exports.getRelatedProducts = async (req, res, next) => {
         : { category: currentProduct.category };
     }
 
+    // Products placed in a sub-category (spare parts, attachments) show under
+    // Accessories, not here. A spare part's related products are the others
+    // in its own sub-categories.
+    const ownSubCategories = (currentProduct.placements || [])
+      .map((placement) => placement.subCategory)
+      .filter(Boolean);
+    const placementCondition = ownSubCategories.length > 0
+      ? { 'placements.subCategory': { $in: ownSubCategories } }
+      : { placements: { $not: { $elemMatch: { subCategory: { $ne: null } } } } };
+
     const relatedProducts = await Product.find({
       status: 'active',
-      $and: [relatedCategoryCondition, notComingSoonFilter(new Date())],
+      $and: [
+        ...(ownSubCategories.length > 0 ? [] : [relatedCategoryCondition]),
+        placementCondition,
+        notComingSoonFilter(new Date()),
+      ],
       _id: { $ne: currentProduct._id }
     })
       .select(`name nameHindi slug shortDescription category categoryIds primaryCategoryId brand mrp retailPrice wholesalePrice minWholesaleQuantity negotiationEnabled stock images isFeatured isHot isNew company ${SHOPPER_FIELDS}`)

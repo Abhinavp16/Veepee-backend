@@ -1,7 +1,9 @@
-const { User, Order, Negotiation, DeviceToken, Notification } = require('../../models');
+const crypto = require('crypto');
+const { User, Order, Negotiation, DeviceToken, Notification, RefreshToken } = require('../../models');
 const notificationService = require('../../services/notificationService');
+const { claimOpenRequest, releaseClaim, openRequestedAt, historyFor } = require('../../services/passwordResetRequestService');
 const mongoose = require('mongoose');
-const { NotFoundError, BadRequestError } = require('../../utils/errors');
+const { NotFoundError, BadRequestError, ConflictError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
 const { USER_ROLES, PAID_ORDER_STATUSES } = require('../../utils/constants');
 
@@ -79,10 +81,14 @@ exports.getCustomerById = async (req, res, next) => {
       ]),
     ]);
 
-    const recentOrders = await Order.find({ userId: customer._id })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('orderNumber total status createdAt');
+    const [recentOrders, passwordResetRequestedAt, passwordResetRequests] = await Promise.all([
+      Order.find({ userId: customer._id })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('orderNumber total status createdAt'),
+      openRequestedAt(customer._id),
+      historyFor(customer._id, 5),
+    ]);
 
     res.json({
       success: true,
@@ -98,7 +104,66 @@ exports.getCustomerById = async (req, res, next) => {
           }, {}),
         },
         recentOrders,
+        // When the customer's open "forgot password" request was made.
+        passwordResetRequestedAt,
+        // Their latest requests: when asked, and when reset.
+        passwordResetRequests,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// A one-time password from support works for this long.
+const TEMP_PASSWORD_HOURS = 24;
+
+/**
+ * POST /admin/customers/:id/reset-password: for a customer who forgot their
+ * password and called OXON from their registered number. Issues a one-time
+ * password (e.g. OX-482917, 24 hours), signs them out everywhere, and the
+ * app makes them choose a new password when they sign in with it.
+ */
+exports.resetCustomerPassword = async (req, res, next) => {
+  try {
+    const customer = await User.findOne({ _id: req.params.id, ...customerQuery }).select('+passwordHash');
+    if (!customer) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+    // Only when the customer asked from the app in the last 24 hours; each
+    // request allows one reset.
+    const request = await claimOpenRequest(customer._id, req.user);
+    if (!request) {
+      throw new ConflictError(
+        'The customer has not asked for a reset. Ask them to tap Forgot Password in the app and send the request.',
+        'NO_RESET_REQUEST'
+      );
+    }
+
+    const digits = crypto.randomInt(0, 100000000).toString().padStart(8, '0');
+    const temporaryPassword = `OX-${digits.slice(0, 4)}-${digits.slice(4)}`;
+    const expiresAt = new Date(Date.now() + TEMP_PASSWORD_HOURS * 60 * 60 * 1000);
+    customer.passwordHash = temporaryPassword;
+    customer.mustChangePassword = true;
+    customer.tempPasswordExpiresAt = expiresAt;
+    customer.tempPasswordFailures = 0;
+    // Access tokens issued before this stop working too (see protect).
+    customer.passwordChangedAt = new Date();
+    customer.passwordResets.push({ at: new Date(), by: req.user._id, byName: req.user.name || '' });
+    try {
+      await customer.save();
+    } catch (error) {
+      await releaseClaim(request._id);
+      throw error;
+    }
+    await RefreshToken.updateMany({ userId: customer._id, isRevoked: false }, { isRevoked: true });
+
+    notificationService
+      .sendLocalizedToUser(customer._id, 'passwordResetBySupport', {}, { type: 'account_update', event: 'PASSWORD_RESET' })
+      .catch((error) => console.error('Password reset notification failed:', error.message));
+
+    res.json({
+      success: true,
+      message: 'One-time password issued. The customer is signed out everywhere.',
+      data: { temporaryPassword, expiresAt, passwordResets: customer.passwordResets },
     });
   } catch (error) {
     next(error);

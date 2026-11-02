@@ -19,6 +19,7 @@ const adminOfferController = require('../controllers/admin/offerController');
 const adminAffiliateController = require('../controllers/admin/affiliateCodeController');
 const adminReviewController = require('../controllers/admin/reviewController');
 const adminAccountDeletionController = require('../controllers/admin/accountDeletionController');
+const adminPasswordResetRequestController = require('../controllers/admin/passwordResetRequestController');
 const staffController = require('../controllers/admin/staffController');
 const { adminValidation } = require('../validations');
 
@@ -114,6 +115,8 @@ router.get('/customers', operationsStaff, adminCustomerController.getCustomers);
 router.get('/customers/:id', operationsStaff, adminCustomerController.getCustomerById);
 router.put('/customers/:id/upgrade', administrator, validate(adminValidation.upgradeCustomer), adminCustomerController.upgradeCustomer);
 router.put('/customers/:id/account-type', administrator, validate(adminValidation.updateCustomerAccountType), adminCustomerController.updateCustomerAccountType);
+router.post('/customers/:id/reset-password', administrator, adminCustomerController.resetCustomerPassword);
+router.get('/password-reset-requests', administrator, adminPasswordResetRequestController.getRequests);
 router.post('/customers/notifications', administrator, validate(adminValidation.sendNotification), adminCustomerController.sendNotification);
 
 // The summary is sufficient for operational context; all other analytics remain Administrator-only.

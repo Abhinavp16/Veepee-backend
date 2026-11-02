@@ -130,6 +130,18 @@ const userSchema = new mongoose.Schema({
   // chooses their own.
   mustChangePassword: { type: Boolean, default: false },
   passwordChangedAt: { type: Date, default: null },
+  // A customer's one-time password from OXON support stops working after
+  // this (staff temporary passwords don't set it).
+  tempPasswordExpiresAt: { type: Date, default: null },
+  // Wrong tries with that one-time password; it stops working at 5.
+  tempPasswordFailures: { type: Number, default: 0 },
+  // Every password reset by OXON support (admin only).
+  passwordResets: [{
+    _id: false,
+    at: { type: Date, default: Date.now },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    byName: { type: String, default: '' },
+  }],
 
   // Proof of what the person agreed to at signup.
   termsAcceptedAt: { type: Date, default: null },

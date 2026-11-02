@@ -5,7 +5,7 @@ const accountDeletionController = require('../controllers/accountDeletionControl
 const { protect, authorize, buyerOrWholesaler } = require('../middlewares/auth');
 const { uploadAvatar, uploadProductImages } = require('../config/cloudinary');
 const validate = require('../middlewares/validate');
-const { createAuthLimiter } = require('../middlewares/rateLimits');
+const { createAuthLimiter, passwordResetRequestLimiter } = require('../middlewares/rateLimits');
 const { authValidation } = require('../validations');
 
 // Failed sign-ins, sign-ups and code requests are limited per phone/email and
@@ -19,6 +19,7 @@ router.post('/register-phone/wholesaler', authLimiter, validate(authValidation.r
 router.post('/login', authLimiter, validate(authValidation.login), authController.login);
 router.post('/staff-login', authLimiter, validate(authValidation.staffLogin), authController.staffLogin);
 router.post('/login-phone', authLimiter, validate(authValidation.loginPhone), authController.loginWithPhone);
+router.post('/forgot-password', passwordResetRequestLimiter, validate(authValidation.requestPasswordReset), authController.requestPasswordReset);
 router.post('/send-otp', authLimiter, validate(authValidation.sendOtp), authController.sendOtp);
 router.post('/verify-phone', authLimiter, validate(authValidation.verifyPhone), authController.verifyPhone);
 router.post('/refresh-token', validate(authValidation.refreshToken), authController.refreshToken);

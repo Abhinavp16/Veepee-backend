@@ -11,6 +11,7 @@ const adminNotificationSchema = new mongoose.Schema({
       'new_negotiation',
       'deletion_request',
       'upgrade_request',
+      'password_reset_request',
     ],
     required: true,
   },

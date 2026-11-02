@@ -130,6 +130,10 @@ const authValidation = {
     language: Joi.string().valid('en', 'hi').required(),
   }),
 
+  requestPasswordReset: Joi.object({
+    phone: indianPhone.required(),
+  }),
+
   sendOtp: Joi.object({
     phone: indianPhone.required(),
   }),

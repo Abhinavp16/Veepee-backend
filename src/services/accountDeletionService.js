@@ -6,6 +6,7 @@ const {
   Negotiation,
   Notification,
   Order,
+  PasswordResetRequest,
   Payment,
   RefreshToken,
   User,
@@ -145,6 +146,7 @@ async function completeRequest({ requestId, adminUserId, staffNote = '', identit
     DeviceToken.deleteMany({ userId }),
     Notification.deleteMany({ userId }),
     RefreshToken.deleteMany({ userId }),
+    PasswordResetRequest.deleteMany({ userId }),
     Negotiation.deleteMany({ wholesalerId: userId, _id: { $nin: linkedNegotiationIds } }),
     Analytics.updateMany({ userId }, { $unset: { userId: 1 } }),
     // Orders and payments are retained for accounting. Name, phone and street

@@ -4,6 +4,12 @@ const { UnauthorizedError, ForbiddenError } = require('../utils/errors');
 
 const PASSWORD_CHANGE_ALLOWED = ['/auth/change-password', '/auth/me', '/auth/logout'];
 
+// A token issued before the password last changed (or was reset by support)
+// no longer works. Same-second tokens pass: change-password issues one.
+const issuedBeforePasswordChange = (decoded, user) => Boolean(
+  user.passwordChangedAt && decoded.iat && decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)
+);
+
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -37,6 +43,10 @@ const protect = async (req, res, next) => {
       throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
     }
 
+    if (issuedBeforePasswordChange(decoded, user)) {
+      throw new UnauthorizedError('Password changed, please sign in again', 'PASSWORD_CHANGED');
+    }
+
     // After an admin issues a temporary password, only changing it is allowed.
     if (user.mustChangePassword && !PASSWORD_CHANGE_ALLOWED.some((path) => req.originalUrl.split('?')[0].endsWith(path))) {
       throw new ForbiddenError('Please change your temporary password first', 'PASSWORD_CHANGE_REQUIRED');
@@ -67,7 +77,7 @@ const optionalAuth = async (req, res, next) => {
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findById(decoded.userId).select('-passwordHash');
-      if (user && user.isActive) {
+      if (user && user.isActive && !issuedBeforePasswordChange(decoded, user)) {
         req.user = user;
       }
     }

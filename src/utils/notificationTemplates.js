@@ -127,6 +127,10 @@ const TEMPLATES = {
     en: { title: 'Your account is now a customer account', body: 'Reason: {reason}. You now see customer prices and can apply again from your profile.' },
     hi: { title: 'आपका खाता अब ग्राहक खाता है', body: 'कारण: {reason}। अब आपको ग्राहक कीमतें दिखेंगी, और आप अपनी प्रोफ़ाइल से फिर से आवेदन कर सकते हैं।' },
   },
+  passwordResetBySupport: {
+    en: { title: 'Your password was reset', body: 'OXON support reset your password. Sign in with the one-time password they gave you, then choose a new one.' },
+    hi: { title: 'आपका पासवर्ड रीसेट किया गया', body: 'OXON सहायता ने आपका पासवर्ड रीसेट किया है। उनके दिए एक-बार के पासवर्ड से साइन इन करें, फिर नया पासवर्ड चुनें।' },
+  },
   accountSwitchedToWholesaler: {
     en: { title: 'You are now a wholesaler', body: 'Your account now shows wholesale prices and bulk negotiation.' },
     hi: { title: 'अब आप थोक विक्रेता हैं', body: 'आपके खाते में अब थोक कीमतें और थोक मोलभाव दिखेंगे।' },

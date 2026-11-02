@@ -8,6 +8,7 @@ const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 const { sanitizeUser } = require('../utils/helpers');
 const { requireAcceptance, buildAcceptanceFields } = require('../config/legalAcceptance');
 const { notifyTeam } = require('../services/adminNotificationService');
+const { recordRequest } = require('../services/passwordResetRequestService');
 
 const { ACCESS_SECONDS, REFRESH_SECONDS, DASHBOARD_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
 
@@ -127,6 +128,39 @@ exports.registerWholesaler = async (req, res, next) => {
   }
 };
 
+// A one-time password from OXON support works for 24 hours and 5 wrong tries.
+const TEMP_PASSWORD_MAX_FAILURES = 5;
+const hasSupportPassword = (user) => user.mustChangePassword && Boolean(user.tempPasswordExpiresAt);
+
+const assertTemporaryPasswordValid = (user) => {
+  if (!hasSupportPassword(user)) return;
+  if (user.tempPasswordExpiresAt < new Date() || (user.tempPasswordFailures || 0) >= TEMP_PASSWORD_MAX_FAILURES) {
+    throw new UnauthorizedError(
+      'This one-time password no longer works. Call or WhatsApp OXON for a new one.',
+      'TEMP_PASSWORD_EXPIRED'
+    );
+  }
+};
+
+// "ox 1234 5678" or "12345678" → "OX-1234-5678".
+const oneTimePasswordForm = (typed) => {
+  const digits = String(typed || '').replace(/\D/g, '');
+  return digits.length === 8 ? `OX-${digits.slice(0, 4)}-${digits.slice(4)}` : null;
+};
+
+/**
+ * Whether [typed] is the user's password. A one-time password from support
+ * may be typed in any case or spacing, and wrong tries at it are counted.
+ */
+const passwordMatches = async (user, typed) => {
+  if (await user.comparePassword(typed)) return true;
+  if (!hasSupportPassword(user)) return false;
+  const form = oneTimePasswordForm(typed);
+  if (form && form !== typed && (await user.comparePassword(form))) return true;
+  await User.updateOne({ _id: user._id }, { $inc: { tempPasswordFailures: 1 } });
+  return false;
+};
+
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -140,10 +174,12 @@ exports.login = async (req, res, next) => {
       throw new BadRequestError(`Please login with ${user.authProvider}`, 'AUTH_WRONG_PROVIDER');
     }
 
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await passwordMatches(user, password);
     if (!isMatch) {
       throw new UnauthorizedError('Invalid credentials', 'AUTH_INVALID_CREDENTIALS');
     }
+
+    assertTemporaryPasswordValid(user);
 
     if (!user.isActive) {
       throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');
@@ -202,15 +238,18 @@ exports.changePassword = async (req, res, next) => {
     const { currentPassword, newPassword } = req.body;
     const user = await User.findById(req.user._id).select('+passwordHash');
 
-    if (!(await user.comparePassword(currentPassword))) {
+    if (!(await passwordMatches(user, currentPassword))) {
       throw new UnauthorizedError('Current password is incorrect', 'AUTH_INVALID_CREDENTIALS');
     }
+    assertTemporaryPasswordValid(user);
     if (await user.comparePassword(newPassword)) {
       throw new BadRequestError('Choose a password you have not used just now', 'PASSWORD_UNCHANGED');
     }
 
     user.passwordHash = newPassword;
     user.mustChangePassword = false;
+    user.tempPasswordExpiresAt = null;
+    user.tempPasswordFailures = 0;
     user.passwordChangedAt = new Date();
     await user.save();
 
@@ -232,6 +271,45 @@ exports.changePassword = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /auth/forgot-password: the customer asks OXON to reset their
+ * password. Admin can only reset it after this (see resetCustomerPassword).
+ * The answer is the same whether or not the number has an account.
+ */
+exports.requestPasswordReset = async (req, res, next) => {
+  try {
+    const { phone } = req.body;
+    const customer = await User.findOne({
+      phone,
+      role: { $in: [USER_ROLES.BUYER, USER_ROLES.WHOLESALER] },
+      deletedAt: null,
+      isActive: true,
+    }).select('name phone role').lean();
+
+    if (customer) {
+      const { created } = await recordRequest(customer);
+      // One alert per request; asking again the same day only extends it.
+      if (created) {
+        notifyTeam({
+          type: 'password_reset_request',
+          audience: 'admin',
+          title: 'Password reset requested',
+          body: `${customer.name || 'A customer'} (${customer.phone}) asked to reset their password from the app.`,
+          link: '/password-reset-requests',
+          data: { userId: customer._id },
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Request sent. Call or WhatsApp OXON from this number for your one-time password.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.loginWithPhone = async (req, res, next) => {
   try {
     const { phone, password, expectedRole } = req.body;
@@ -241,10 +319,12 @@ exports.loginWithPhone = async (req, res, next) => {
       throw new UnauthorizedError('Invalid credentials', 'AUTH_INVALID_CREDENTIALS');
     }
 
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await passwordMatches(user, password);
     if (!isMatch) {
       throw new UnauthorizedError('Invalid credentials', 'AUTH_INVALID_CREDENTIALS');
     }
+
+    assertTemporaryPasswordValid(user);
 
     if (!user.isActive) {
       throw new UnauthorizedError('Account is deactivated', 'ACCOUNT_DEACTIVATED');

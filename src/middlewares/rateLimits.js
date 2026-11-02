@@ -101,6 +101,24 @@ const createAuthLimiter = ({
   return [byIdentity, byIp];
 };
 
+// "Forgot password" requests: every request counts (the answer is always
+// the same), per phone and per address.
+const passwordResetRequestLimiter = [
+  rateLimit({
+    ...common,
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    skip: (req) => !identityOf(req),
+    keyGenerator: (req) => `reset-id:${identityOf(req)}`,
+  }),
+  rateLimit({
+    ...common,
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    keyGenerator: (req) => `reset-ip:${clientIp(req)}`,
+  }),
+];
+
 // The public account-deletion form on the website.
 const publicFormLimiter = rateLimit({
   ...common,
@@ -115,4 +133,5 @@ module.exports = {
   createApiLimiter,
   createAuthLimiter,
   publicFormLimiter,
+  passwordResetRequestLimiter,
 };

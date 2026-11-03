@@ -55,6 +55,14 @@ const settingsSchema = new mongoose.Schema({
   },
   // Bulk negotiation: the "2% off" quick picks on the app's price step, and
   // the most a wholesaler may ask off the normal wholesale price.
+  // After a wholesaler sends a price request or places an order, the app
+  // opens WhatsApp on this number with the details typed in.
+  whatsappAlerts: {
+    enabled: { type: Boolean, default: true },
+    number: { type: String, default: '917828832346' },
+    negotiations: { type: Boolean, default: true },
+    orders: { type: Boolean, default: true },
+  },
   negotiationQuickPicks: {
     type: [Number],
     default: [2, 1],

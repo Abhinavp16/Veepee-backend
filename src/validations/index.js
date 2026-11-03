@@ -598,6 +598,12 @@ const adminValidation = {
     defaultBulkMinQuantity: Joi.number().integer().min(1),
     negotiationExpiryDays: Joi.number().integer().min(1),
     negotiationQuickPicks: Joi.array().items(Joi.number().min(0.5).max(50)).max(4).unique(),
+    whatsappAlerts: Joi.object({
+      enabled: Joi.boolean(),
+      number: Joi.string().trim().max(20),
+      negotiations: Joi.boolean(),
+      orders: Joi.boolean(),
+    }),
     negotiationMaxDiscountPercent: Joi.number().min(1).max(90),
     lowStockThreshold: Joi.number().integer().min(0),
     mobileApp: Joi.object({

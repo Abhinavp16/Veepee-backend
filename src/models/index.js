@@ -23,6 +23,7 @@ const SubCategory = require('./SubCategory');
 const PriceChangeAudit = require('./PriceChangeAudit');
 const AccountDeletionRequest = require('./AccountDeletionRequest');
 const PasswordResetRequest = require('./PasswordResetRequest');
+const ShareLink = require('./ShareLink');
 const LeadContact = require('./LeadContact');
 const Sale = require('./Sale');
 const SaleClaim = require('./SaleClaim');
@@ -46,6 +47,7 @@ module.exports = {
   ProductAlert,
   AdminNotification,
   PasswordResetRequest,
+  ShareLink,
   Notification,
   Offer,
   AffiliateCode,

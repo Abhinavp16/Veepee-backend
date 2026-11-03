@@ -10,6 +10,8 @@ const { publicFormLimiter } = require('../middlewares/rateLimits');
 const validate = require('../middlewares/validate');
 const { authValidation } = require('../validations');
 const accountDeletionController = require('../controllers/accountDeletionController');
+const oxonWhatsAppController = require('../controllers/oxonWhatsAppController');
+const { protect, authorize } = require('../middlewares/auth');
 
 const authRoutes = require('./authRoutes');
 const productRoutes = require('./productRoutes');
@@ -375,6 +377,11 @@ router.use('/categories', categoryRoutes);
 router.use('/sub-categories', require('./subCategoryRoutes'));
 router.use('/upload', uploadRoutes);
 router.use('/notifications', notificationRoutes);
+
+// A wholesaler's price request or order, sent on to OXON's WhatsApp.
+router.get('/whatsapp-alert', protect, authorize('wholesaler'), oxonWhatsAppController.getAlert);
+// The PDF behind the link in that message (no sign-in; a private link).
+router.get('/s/:token', oxonWhatsAppController.getSharedPdf);
 
 // Public endpoint for active offers (no auth required)
 router.get('/offers', async (req, res, next) => {

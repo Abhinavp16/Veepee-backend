@@ -8,6 +8,7 @@ const { transliterateToHindi } = require('../../services/hindiTransliterationSer
 const { PRODUCT_STATUS } = require('../../utils/constants');
 const { updateProductCount } = require('../categoryController');
 const { notifyLaunchAlerts } = require('../../services/productLaunchService');
+const { deleteProductPermanently } = require('../../services/catalogDeletion');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const { toStoredWebp } = require('../../utils/imageProcessing');
@@ -137,7 +138,10 @@ exports.getProducts = async (req, res, next) => {
     const { page, limit, skip } = paginate(req.query.page, categoryId ? 20 : req.query.limit, categoryId ? 20 : 100);
 
     const query = {};
-    if (status) query.status = status;
+    // Archived products are left out unless asked for (status=archived, or
+    // status=all for everything).
+    if (status && status !== 'all') query.status = status;
+    else if (!status) query.status = { $ne: PRODUCT_STATUS.ARCHIVED };
     if (companyId) {
       if (!mongoose.Types.ObjectId.isValid(companyId)) {
         throw new BadRequestError('companyId must be a valid ID', 'INVALID_COMPANY_ID');
@@ -156,8 +160,6 @@ exports.getProducts = async (req, res, next) => {
         : [await Category.findById(categoryId).select('_id slug').lean()];
       if (!categories[0]) throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       query.$and = [categoryProductCondition(categories)];
-      // Price management only works with products that can still be managed.
-      if (!status) query.status = { $ne: PRODUCT_STATUS.ARCHIVED };
     } else if (category) {
       const categoryDocument = await Category.findOne({ slug: String(category).trim().toLowerCase() })
         .select('_id slug')
@@ -403,6 +405,66 @@ exports.deleteProduct = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Product archived successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @route DELETE /api/v1/admin/products/:id/permanent
+// Deletes the product for good (no restore). Refused while it's in an order
+// in progress, an open price request or a sale that hasn't ended.
+exports.deleteProductPermanently = async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+    }
+    const previousCategories = product.categoryIds?.length
+      ? product.categoryIds.map(String)
+      : [product.category].filter(Boolean);
+    await deleteProductPermanently(product);
+    await updateProductCount(previousCategories);
+
+    res.json({
+      success: true,
+      message: 'Product deleted permanently',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @route POST /api/v1/admin/products/:id/restore
+// An archived product goes back on sale. It needs a category to show in; one
+// whose category was deleted is edited first.
+exports.restoreProduct = async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+    }
+    if (product.status !== PRODUCT_STATUS.ARCHIVED) {
+      throw new BadRequestError('Only archived products can be restored', 'PRODUCT_NOT_ARCHIVED');
+    }
+    const categoryIds = (product.categoryIds || []).map(String);
+    // Older products name their category only by its slug.
+    const existing = categoryIds.length
+      ? await Category.countDocuments({ _id: { $in: categoryIds } })
+      : await Category.countDocuments({ slug: product.category });
+    if (existing === 0) {
+      throw new BadRequestError(
+        'This product\'s category was deleted. Edit it, choose a category, and set its status to Active.',
+        'PRODUCT_NEEDS_CATEGORY'
+      );
+    }
+    product.status = PRODUCT_STATUS.ACTIVE;
+    await product.save();
+    await updateProductCount(categoryIds.length ? categoryIds : [product.category]);
+
+    res.json({
+      success: true,
+      message: 'Product restored',
     });
   } catch (error) {
     next(error);

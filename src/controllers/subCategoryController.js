@@ -3,6 +3,7 @@ const slugify = require('slugify');
 const { Category, SubCategory, Product, Company } = require('../models');
 const { PRODUCT_STATUS } = require('../utils/constants');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
+const { notArchived, detachArchivedFromSubCategory, deleteImageIfUnused } = require('../services/catalogDeletion');
 const { escapeRegExp, getCategoryAndDescendants } = require('../utils/categoryHelpers');
 const { notComingSoonFilter } = require('../utils/productAvailability');
 
@@ -248,7 +249,8 @@ exports.remove = async (req, res, next) => {
   try {
     const sub = await SubCategory.findById(req.params.id);
     if (!sub) throw new NotFoundError('Sub-category not found', 'SUB_CATEGORY_NOT_FOUND');
-    const placed = await Product.countDocuments({ 'placements.subCategory': sub._id });
+    // Archived products don't count: they stay in the category.
+    const placed = await Product.countDocuments({ ...notArchived, 'placements.subCategory': sub._id });
     if (placed > 0) {
       return res.status(400).json({
         success: false,
@@ -257,6 +259,8 @@ exports.remove = async (req, res, next) => {
       });
     }
     await sub.deleteOne();
+    await detachArchivedFromSubCategory(sub._id);
+    await deleteImageIfUnused(sub.image?.publicId);
     res.json({ success: true, message: 'Sub-category deleted' });
   } catch (error) {
     next(error);

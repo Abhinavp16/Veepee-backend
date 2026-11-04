@@ -82,6 +82,8 @@ router.put(
 );
 router.put('/products/:id/stock', administrator, validate(adminValidation.updateStock), adminProductController.updateStock);
 router.delete('/products/:id', administrator, adminProductController.deleteProduct);
+router.delete('/products/:id/permanent', administrator, adminProductController.deleteProductPermanently);
+router.post('/products/:id/restore', administrator, adminProductController.restoreProduct);
 router.get('/products/:id/stock-logs', administrator, adminProductController.getStockLogs);
 router.delete('/products/:id/images/:imageId', administrator, adminProductController.deleteProductImage);
 router.post('/products/hindi-names/generate-missing', administrator, adminProductController.generateMissingHindiNames);

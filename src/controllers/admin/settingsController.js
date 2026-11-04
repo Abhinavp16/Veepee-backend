@@ -3,6 +3,7 @@ const { forgetGuestPricing } = require('../../services/guestPricing');
 const { normalizeQuickPicks } = require('../../utils/negotiationRules');
 const { normalizeWhatsAppNumber } = require('../../services/oxonWhatsAppService');
 const { BadRequestError } = require('../../utils/errors');
+const { deleteRemovedBannerFiles } = require('../../services/catalogDeletion');
 
 // Leftover Razorpay fields are never sent (the gateway was removed).
 const withoutRazorpay = (settings) => {
@@ -33,6 +34,11 @@ exports.updateSettings = async (req, res, next) => {
     if (!settings) {
       settings = new Settings({ _id: 'app_settings' });
     }
+
+    // A banner taken off (or its picture or video changed) has its old files
+    // removed from storage once saved.
+    const bannersBefore = [...(settings.heroBanners || []), ...(settings.promoBanners || [])]
+      .map((banner) => ({ imageUrl: banner.imageUrl, videoUrl: banner.videoUrl }));
 
     const allowedFields = [
       'businessName',
@@ -86,6 +92,7 @@ exports.updateSettings = async (req, res, next) => {
 
     await settings.save();
     forgetGuestPricing();
+    await deleteRemovedBannerFiles(bannersBefore, [...(settings.heroBanners || []), ...(settings.promoBanners || [])]);
 
     res.json({
       success: true,

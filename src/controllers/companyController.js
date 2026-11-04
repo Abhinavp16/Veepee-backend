@@ -4,6 +4,7 @@ const { NotFoundError, ConflictError, BadRequestError } = require('../utils/erro
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS } = require('../utils/constants');
 const { categoryProductCondition } = require('../utils/categoryHelpers');
+const { notArchived, detachArchivedFromCompany, deleteImageIfUnused } = require('../services/catalogDeletion');
 const { createGlobalCategory, removeCreatedCategory } = require('../services/categoryService');
 const { getCompanyCategoryCounts, sortCategoriesByTree } = require('../utils/companyCategoryHelpers');
 
@@ -164,8 +165,9 @@ exports.deleteCompany = async (req, res, next) => {
       throw new NotFoundError('Company not found', 'COMPANY_NOT_FOUND');
     }
 
-    // Check if any products are linked to this company
-    const productCount = await Product.countDocuments({ company: company._id });
+    // Products still linked to it (archived ones don't count: they're left
+    // without a brand below).
+    const productCount = await Product.countDocuments({ ...notArchived, company: company._id });
     if (productCount > 0) {
       throw new ConflictError(
         `Cannot delete company. ${productCount} product(s) are linked to it.`,
@@ -174,6 +176,8 @@ exports.deleteCompany = async (req, res, next) => {
     }
 
     await company.deleteOne();
+    await detachArchivedFromCompany(company._id);
+    await deleteImageIfUnused(company.logo?.publicId);
 
     res.json({
       success: true,
@@ -308,6 +312,7 @@ exports.unlinkCompanyCategory = async (req, res, next) => {
     if (!category) throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
 
     const productCount = await Product.countDocuments({
+      ...notArchived,
       company: company._id,
       ...categoryProductCondition(category),
     });

@@ -4,6 +4,7 @@ const Product = require('../models/Product');
 const Company = require('../models/Company');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS } = require('../utils/constants');
+const { notArchived, detachArchivedFromCategory, deleteImageIfUnused } = require('../services/catalogDeletion');
 const { categoryProductCondition, escapeRegExp, normalizeObjectIds } = require('../utils/categoryHelpers');
 const {
   createGlobalCategory,
@@ -266,7 +267,8 @@ exports.deleteCategory = async (req, res, next) => {
     if (await Category.exists({ parent: category._id })) {
       return res.status(400).json({ success: false, message: 'Cannot delete category with subcategories. Delete subcategories first.' });
     }
-    const products = await Product.countDocuments(categoryProductCondition(category));
+    // Archived products don't count: they come off it below.
+    const products = await Product.countDocuments({ ...notArchived, ...categoryProductCondition(category) });
     if (products > 0) {
       return res.status(400).json({ success: false, message: `Cannot delete category with ${products} product(s). Reassign products first.` });
     }
@@ -275,6 +277,8 @@ exports.deleteCategory = async (req, res, next) => {
     category = await Category.findById(category._id);
     const order = category.order;
     await category.deleteOne();
+    await detachArchivedFromCategory(category._id);
+    await deleteImageIfUnused(category.image?.publicId);
     // Sub-categories stop showing under it.
     await require('../models/SubCategory').updateMany(
       { 'categories.category': category._id },

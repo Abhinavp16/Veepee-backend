@@ -73,6 +73,21 @@ async function run() {
     assert.strictEqual(res.json.data.android.enabled, true);
     assert.strictEqual(res.json.data.android.latestBuildNumber, 7);
     assert.strictEqual(res.json.data.android.title, 'Update');
+    assert.strictEqual(res.json.data.android.suggestEnabled, false, 'no suggested update unless set');
+
+    // A suggested update (Update / Later) sits beside the required one.
+    res = await call('PUT', '/admin/settings', { token: adminToken, body: { mobileApp: { android: {
+      enabled: true, latestVersion: '1.2.0', latestBuildNumber: 7, storeUrl: 'https://play.google.com/store/apps/details?id=com.veepeeimpex.oxon',
+      suggestEnabled: true, suggestVersion: '1.3.0', suggestBuildNumber: 9, suggestMessage: 'Faster search',
+    } } } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    res = await call('GET', '/settings/mobile-app');
+    assert.strictEqual(res.json.data.android.suggestEnabled, true);
+    assert.strictEqual(res.json.data.android.suggestVersion, '1.3.0');
+    assert.strictEqual(res.json.data.android.suggestBuildNumber, 9);
+    assert.strictEqual(res.json.data.android.suggestMessage, 'Faster search');
+    assert.strictEqual(res.json.data.android.latestBuildNumber, 7, 'the required update is unchanged');
+    assert.strictEqual(res.json.data.ios.suggestEnabled, false);
 
     res = await call('PUT', '/admin/settings', { token: adminToken, body: { mobileApp: { android: { storeUrl: 'https://evil.example.com/app' } } } });
     assert.strictEqual(res.status, 400, 'a non-store link must be rejected');

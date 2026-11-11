@@ -9,6 +9,13 @@ const platformUpdateSchema = {
   storeUrl: { type: String, default: '' },
   title: { type: String, default: '' },
   message: { type: String, default: '' },
+  // A suggested update: builds older than suggestBuildNumber see an
+  // "Update / Later" popup. Separate from the required update above, so
+  // app versions that only know that one never block on a suggestion.
+  suggestEnabled: { type: Boolean, default: false },
+  suggestVersion: { type: String, default: '' },
+  suggestBuildNumber: { type: Number, default: 0, min: 0 },
+  suggestMessage: { type: String, default: '' },
 };
 
 const settingsSchema = new mongoose.Schema({

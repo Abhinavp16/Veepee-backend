@@ -225,6 +225,10 @@ router.get('/settings/mobile-app', async (req, res, next) => {
       storeUrl: rule.storeUrl || '',
       title: rule.title || '',
       message: rule.message || '',
+      suggestEnabled: rule.suggestEnabled === true,
+      suggestVersion: rule.suggestVersion || '',
+      suggestBuildNumber: Number(rule.suggestBuildNumber) || 0,
+      suggestMessage: rule.suggestMessage || '',
     });
     res.set('Cache-Control', 'no-store');
     res.json({

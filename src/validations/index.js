@@ -32,6 +32,10 @@ const platformUpdate = Joi.object({
   storeUrl,
   title: Joi.string().allow('').max(80),
   message: Joi.string().allow('').max(300),
+  suggestEnabled: Joi.boolean(),
+  suggestVersion: Joi.string().allow('').max(32),
+  suggestBuildNumber: Joi.number().integer().min(0),
+  suggestMessage: Joi.string().allow('').max(300),
 });
 
 const discountRuleSchema = Joi.object({

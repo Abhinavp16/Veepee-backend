@@ -104,7 +104,12 @@ const normalPriceFor = (product, role, ctx) => {
   const { percent, source } = ctx ? resolveDiscount(product, audience, ctx) : { percent: 0, source: null };
   const mrp = Number(product.mrp) || 0;
   if (percent > 0 && mrp > 0) {
-    return { price: round2(mrp * (1 - percent / 100)), mrp, discountPercent: percent, discountSource: source };
+    const discounted = round2(mrp * (1 - percent / 100));
+    // A discount never makes anything dearer: when the normal price is
+    // already lower, that is the price.
+    if (!(Number(base) > 0) || discounted <= Number(base)) {
+      return { price: discounted, mrp, discountPercent: percent, discountSource: source };
+    }
   }
   return { price: base, mrp, discountPercent: 0, discountSource: null };
 };

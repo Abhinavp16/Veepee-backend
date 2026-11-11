@@ -64,6 +64,7 @@ const { assertQuantityAllowed } = require('../utils/quantityRules');
 const { notifyTeam } = require('../services/adminNotificationService');
 const { loadGroup, summarizeGroup } = require('../services/requirementGroupService');
 const { reserveAffiliateUse, releaseAffiliateUse } = require('../services/affiliateCommissionService');
+const { assertOfferUsable, reserveOfferUse, releaseOfferUse } = require('../services/couponUsageService');
 
 const calculateDiscount = (subtotal, discountType, discountValue, maxDiscountAmount) => {
   let discount = 0;
@@ -229,6 +230,7 @@ const resolveCouponDiscount = async ({ couponCode, subtotal, userRole, userId = 
   if (!offer) {
     throw new BadRequestError('Invalid or expired coupon code', 'INVALID_COUPON');
   }
+  await assertOfferUsable(offer, userId);
 
   const { matchedRule, minRequired } = pickDiscountRule(subtotal, offer.discountRules, {
     minPurchaseAmount: offer.minPurchaseAmount || 0,
@@ -663,7 +665,15 @@ exports.createOrderFromCart = async (req, res, next) => {
     // The code's use is taken before the order is saved (given back if it
     // isn't), so the last use can't go to two orders at once.
     const affiliateCodeId = discountSource === 'affiliate' ? affiliateMeta?.id : null;
-    if (affiliateCodeId) await reserveAffiliateUse(affiliateCodeId);
+    const reservedOffer = discountSource === 'offer' ? offerCode : null;
+    try {
+      if (affiliateCodeId) await reserveAffiliateUse(affiliateCodeId);
+      if (reservedOffer) await reserveOfferUse(reservedOffer);
+    } catch (error) {
+      // The last use went to another checkout: the sale units go back too.
+      await giveBackSaleUnits(orderItems, { userId: req.user._id });
+      throw error;
+    }
 
     let order;
     try {
@@ -700,16 +710,10 @@ exports.createOrderFromCart = async (req, res, next) => {
       // Not recorded: the sale units and the code's use go back.
       await giveBackSaleUnits(orderItems, { userId: req.user._id });
       if (affiliateCodeId) await releaseAffiliateUse(affiliateCodeId);
+      if (reservedOffer) await releaseOfferUse(reservedOffer);
       // The same checkout arrived twice at once and the other one won.
       if (isDuplicateKeyError(error) && await respondWithExistingOrder(res, req.user._id, idempotencyKey)) return;
       throw error;
-    }
-
-    if (discountSource === 'offer' && offerCode) {
-      await Offer.findOneAndUpdate(
-        { code: offerCode },
-        { $inc: { usageCount: 1 } }
-      );
     }
 
     // Increment order count (stock deducted when admin confirms/processes)
@@ -754,7 +758,17 @@ exports.createOrderFromCart = async (req, res, next) => {
 // Places ONE order for one or more accepted negotiations (a single deal, or
 // every product of a requirement). Nothing is created unless every line is
 // still orderable.
-const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, customerNote, inputCode }) => {
+/** Coupons and affiliate codes don't apply to an agreed price. */
+const assertNoCouponOnPriceRequest = (code) => {
+  if (String(code || '').trim()) {
+    throw new BadRequestError(
+      'Coupons can\'t be used on price-request orders: the price is already agreed. Remove the coupon to continue.',
+      'COUPON_NOT_FOR_PRICE_REQUESTS'
+    );
+  }
+};
+
+const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, customerNote }) => {
   // Claim the negotiations for this order first, in one step: a second tap
   // (or a retry) finds them taken and places nothing.
   const orderId = new mongoose.Types.ObjectId();
@@ -772,7 +786,7 @@ const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, custo
     throw new ConflictError('This order is already being placed', 'ORDER_ALREADY_PLACED');
   }
   try {
-    return await createNegotiatedOrder({ orderId, user, negotiations, shippingAddress, customerNote, inputCode });
+    return await createNegotiatedOrder({ orderId, user, negotiations, shippingAddress, customerNote });
   } catch (error) {
     // Free them again unless the order itself was already created.
     if (!(await Order.exists({ _id: orderId }))) await release();
@@ -780,7 +794,9 @@ const placeNegotiatedOrder = async ({ user, negotiations, shippingAddress, custo
   }
 };
 
-const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddress, customerNote, inputCode }) => {
+// Price-request orders take no coupon or affiliate code: the price was
+// already agreed.
+const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddress, customerNote }) => {
   const products = await Product.find({ _id: { $in: negotiations.map((n) => n.productId) } });
   const productById = new Map(products.map((p) => [String(p._id), p]));
 
@@ -810,19 +826,8 @@ const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddr
   }
 
   const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-  const {
-    discountSource,
-    offerCode,
-    affiliateCode: resolvedAffiliateCode,
-    affiliateMeta,
-    discount,
-  } = await resolveCouponDiscount({ couponCode: inputCode, subtotal, userRole: user.role, userId: user._id });
-  const total = Math.max(subtotal - discount, 0);
+  const total = subtotal;
   const isGroup = negotiations.length > 1;
-
-  // Taken before the order is saved, given back if it isn't.
-  const affiliateCodeId = discountSource === 'affiliate' ? affiliateMeta?.id : null;
-  if (affiliateCodeId) await reserveAffiliateUse(affiliateCodeId);
 
   const order = await Order.create({
     _id: orderId,
@@ -839,9 +844,7 @@ const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddr
     negotiationIds: negotiations.map((n) => n._id),
     items,
     subtotal,
-    discount,
-    discountSource,
-    affiliateDiscountAmount: discountSource === 'affiliate' ? discount : 0,
+    discount: 0,
     total,
     shippingAddress,
     customerNote,
@@ -850,17 +853,7 @@ const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddr
       status: ORDER_STATUS.PENDING_PAYMENT,
       note: `${isGroup ? 'Order created from a requirement' : 'Order created from negotiation'}; awaiting confirmation and delivery charge`,
     }],
-    affiliateCode: resolvedAffiliateCode,
-    affiliateCodeId,
-    offerCode,
-  }).catch(async (error) => {
-    if (affiliateCodeId) await releaseAffiliateUse(affiliateCodeId);
-    throw error;
   });
-
-  if (discountSource === 'offer' && offerCode) {
-    await Offer.findOneAndUpdate({ code: offerCode }, { $inc: { usageCount: 1 } });
-  }
 
   for (const negotiation of negotiations) {
     negotiation.status = NEGOTIATION_STATUS.CONVERTED;
@@ -893,7 +886,7 @@ const createNegotiatedOrder = async ({ orderId, user, negotiations, shippingAddr
 exports.createOrderFromNegotiation = async (req, res, next) => {
   try {
     const { negotiationId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
-    const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
+    assertNoCouponOnPriceRequest(couponCode || affiliateCode);
 
     const negotiation = await Negotiation.findOne({
       _id: negotiationId,
@@ -914,7 +907,7 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
       throw new BadRequestError('This product is part of a requirement; pay for the whole requirement', 'PART_OF_REQUIREMENT');
     }
 
-    const placed = await placeNegotiatedOrder({ user: req.user, negotiations: [negotiation], shippingAddress, customerNote, inputCode });
+    const placed = await placeNegotiatedOrder({ user: req.user, negotiations: [negotiation], shippingAddress, customerNote });
     res.status(201).json(orderPlacedResponse(placed));
   } catch (error) {
     next(error);
@@ -925,7 +918,7 @@ exports.createOrderFromNegotiation = async (req, res, next) => {
 exports.createOrderFromGroup = async (req, res, next) => {
   try {
     const { groupId, shippingAddress, customerNote, affiliateCode, couponCode } = req.body;
-    const inputCode = (couponCode || affiliateCode || '').trim().toUpperCase();
+    assertNoCouponOnPriceRequest(couponCode || affiliateCode);
 
     const members = await loadGroup(groupId, { wholesalerId: req.user._id });
     const summary = summarizeGroup(members);
@@ -942,7 +935,7 @@ exports.createOrderFromGroup = async (req, res, next) => {
     }
     const payable = members.filter((m) => m.status === NEGOTIATION_STATUS.ACCEPTED && !m.orderId);
 
-    const placed = await placeNegotiatedOrder({ user: req.user, negotiations: payable, shippingAddress, customerNote, inputCode });
+    const placed = await placeNegotiatedOrder({ user: req.user, negotiations: payable, shippingAddress, customerNote });
     res.status(201).json(orderPlacedResponse(placed));
   } catch (error) {
     next(error);

@@ -725,6 +725,8 @@ const adminValidation = {
     isActive: Joi.boolean().default(true),
     minPurchaseAmount: Joi.number().min(0).default(0),
     maxDiscountAmount: Joi.number().min(0).allow('', null),
+    usageLimit: Joi.number().integer().min(0).default(0),
+    perCustomerLimit: Joi.number().integer().min(0).default(0),
   }),
 
   updateOffer: Joi.object({
@@ -741,6 +743,8 @@ const adminValidation = {
     isActive: Joi.boolean(),
     minPurchaseAmount: Joi.number().min(0),
     maxDiscountAmount: Joi.number().min(0).allow('', null),
+    usageLimit: Joi.number().integer().min(0),
+    perCustomerLimit: Joi.number().integer().min(0),
   }),
 
   createAffiliateCode: Joi.object({

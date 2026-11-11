@@ -478,6 +478,8 @@ async function releaseUnpaidSaleOrders(now = new Date()) {
     await giveBackSaleUnits(updated.items, { userId: updated.userId });
     await require('./affiliateCommissionService').reverseAffiliateForOrder(updated._id, 'Not paid in time')
       .catch((error) => console.error(`Affiliate reversal failed for ${updated._id}:`, error.message));
+    await require('./couponUsageService').releaseOfferForOrder(updated._id)
+      .catch((error) => console.error(`Coupon release failed for ${updated._id}:`, error.message));
     try {
       await notificationService.sendLocalizedToUser(
         updated.userId,

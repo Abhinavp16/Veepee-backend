@@ -81,6 +81,18 @@ const offerSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    // Total uses allowed; 0 = no limit.
+    usageLimit: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    // Uses per customer; 0 = no limit.
+    perCustomerLimit: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
     discountRules: {
         type: [discountRuleSchema],
         default: [],

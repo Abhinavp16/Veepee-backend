@@ -132,6 +132,8 @@ async function rejectOrder({ orderId, reason, actorId }) {
   await require('./saleService').giveBackSaleUnits(order.items, { userId: order.userId });
   await require('./affiliateCommissionService').reverseAffiliateForOrder(order._id, 'Order rejected by the shop')
     .catch((error) => console.error(`Affiliate reversal failed for ${order._id}:`, error.message));
+  await require('./couponUsageService').releaseOfferForOrder(order._id)
+    .catch((error) => console.error(`Coupon release failed for ${order._id}:`, error.message));
   await Payment.updateMany(
     { orderId: order._id, status: PAYMENT_STATUS.PENDING },
     { $set: { status: PAYMENT_STATUS.REJECTED, rejectionReason: reason } }

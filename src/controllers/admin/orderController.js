@@ -7,6 +7,7 @@ const notificationService = require('../../services/notificationService');
 const orderConfirmationService = require('../../services/orderConfirmationService');
 const { giveBackSaleUnits } = require('../../services/saleService');
 const { reverseAffiliateForOrder } = require('../../services/affiliateCommissionService');
+const { releaseOfferForOrder } = require('../../services/couponUsageService');
 
 exports.getOrders = async (req, res, next) => {
   try {
@@ -185,6 +186,9 @@ exports.updateOrderStatus = async (req, res, next) => {
       // Its affiliate code's use goes back, and any commission is reversed.
       await reverseAffiliateForOrder(order._id, 'Order cancelled by admin')
         .catch((error) => console.error(`Affiliate reversal failed for ${order._id}:`, error.message));
+      // And its coupon's use.
+      await releaseOfferForOrder(order._id)
+        .catch((error) => console.error(`Coupon release failed for ${order._id}:`, error.message));
     }
 
     try {

@@ -55,7 +55,7 @@ async function run() {
 
   try {
     const category = await Category.create({ name: `Sort ${suffix}`, slug: `sort-${suffix}`, isActive: true });
-    const spare = await Category.create({ name: `Spare ${suffix}`, slug: `spare-${suffix}`, isActive: true, customerDiscountPercent: 10 });
+    const spare = await Category.create({ name: `Spare ${suffix}`, slug: `spare-${suffix}`, isActive: true, customerDiscountPercent: 20 });
     made.categories.push(category._id, spare._id);
     const brand = await Company.create({ name: `Brand ${suffix}`, isActive: true, categoryIds: [category._id] });
     made.companies.push(brand._id);
@@ -120,8 +120,8 @@ async function run() {
     assert.strictEqual(res.status, 200, JSON.stringify(res.json));
     const line = res.json.data.items.find((item) => String(item.productId) === String(sparePart._id));
     assert.strictEqual(line.quantity, 2);
-    assert.strictEqual(line.currentPrice, 1080, '10% category discount off MRP 1200');
-    assert.strictEqual(res.json.data.subtotal, 2160);
+    assert.strictEqual(line.currentPrice, 960, "20% category discount off MRP 1200 (below the normal 1000)");
+    assert.strictEqual(res.json.data.subtotal, 1920);
     res = await call('POST', '/cart/items', { token: buyerToken, body: { productId: String(sparePart._id), quantity: 999 } });
     assert.strictEqual(res.status, 400, 'stock is still checked');
 

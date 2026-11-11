@@ -219,6 +219,11 @@ const orderSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Set when a cancelled order gave its use of the coupon back.
+  offerUsageReleased: {
+    type: Boolean,
+    default: false,
+  },
   offerCode: {
     type: String,
     trim: true,

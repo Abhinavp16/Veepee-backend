@@ -12,13 +12,16 @@ const DEFAULT_WARRANTY = 'OXON products carry the manufacturer or company warran
 /**
  * Whether a product shows the shared text for one policy. Products from
  * before this choice existed (`useCommon` not set) follow the shared text
- * when they hold nothing of their own (never set, or the old built-in text);
- * an emptied field (null or '') still means "show nothing".
+ * unless they hold text of their own: an empty box there only meant it was
+ * left blank (the app then showed its built-in text), as did the old
+ * built-in text. Only a product switched off in the admin shows nothing
+ * when its own box is empty.
  */
 function followsCommon(useCommon, ownText, legacyDefault = null) {
   if (useCommon === true) return true;
   if (useCommon === false) return false;
-  return ownText === undefined || (legacyDefault != null && ownText === legacyDefault);
+  const own = ownText == null ? '' : String(ownText).trim();
+  return own === '' || (legacyDefault != null && ownText === legacyDefault);
 }
 
 /**

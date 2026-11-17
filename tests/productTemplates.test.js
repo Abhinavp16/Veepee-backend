@@ -123,8 +123,8 @@ async function run() {
     assert.strictEqual(data.warranty, null, 'own and empty: nothing shown');
     console.log('ok - a product can have its own text, or none');
 
-    // 5. Products from before: the old built-in text or nothing set follow
-    //    the shared text; typed text stays; an emptied field stays empty.
+    // 5. Products from before: the old built-in text, nothing set, or a box
+    //    left empty follow the shared text; typed text stays.
     const oldDefault = await makeProduct({ shippingTerms: LEGACY_SHIPPING_TERMS });
     const neverSet = await makeProduct();
     const typed = await makeProduct({ shippingTerms: 'Custom delivery note.' });
@@ -132,7 +132,13 @@ async function run() {
     assert.strictEqual((await shown(oldDefault)).shippingTerms, 'Free delivery across Chhattisgarh.');
     assert.strictEqual((await shown(neverSet)).shippingTerms, 'Free delivery across Chhattisgarh.');
     assert.strictEqual((await shown(typed)).shippingTerms, 'Custom delivery note.');
-    assert.strictEqual((await shown(emptied)).shippingTerms, null, 'none: null, so older apps keep their fallback');
+    assert.strictEqual((await shown(emptied)).shippingTerms, 'Free delivery across Chhattisgarh.', 'a box left empty in the old admin follows the shared text');
+    const blank = await makeProduct({ shippingTerms: '' });
+    assert.strictEqual((await shown(blank)).shippingTerms, 'Free delivery across Chhattisgarh.');
+    // Switched off with nothing typed (the new admin): nothing, sent as null
+    // so older apps keep their built-in text.
+    const off = await makeProduct({ useCommonShipping: false, shippingTerms: null });
+    assert.strictEqual((await shown(off)).shippingTerms, null);
     assert.match((await shown(typed)).warranty, /manufacturing defects/, 'older products get the shared warranty');
     console.log('ok - older products follow the shared text unless they have their own');
 

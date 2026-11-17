@@ -25,6 +25,15 @@ const storeUrl = Joi.string()
   .allow('')
   .messages({ 'string.pattern.base': 'Store URL must be a Google Play or App Store link' });
 
+// Shipping & Returns and Warranty on a product: the shared text from
+// Settings (useCommon… true) or the product's own.
+const productPolicyFields = {
+  shippingTerms: Joi.string().allow('', null).max(5000),
+  useCommonShipping: Joi.boolean(),
+  warranty: Joi.string().allow('', null).max(5000),
+  useCommonWarranty: Joi.boolean(),
+};
+
 const platformUpdate = Joi.object({
   enabled: Joi.boolean(),
   latestVersion: Joi.string().allow('').max(32),
@@ -407,7 +416,7 @@ const adminValidation = {
     purchaseCountMax: Joi.number().integer().min(0),
     company: Joi.string().allow('', null),
     videoUrl: Joi.string().allow('', null),
-    shippingTerms: Joi.string().allow('', null),
+    ...productPolicyFields,
   }).or('category', 'categoryIds', 'placements'),
 
   updateProduct: Joi.object({
@@ -454,7 +463,7 @@ const adminValidation = {
     purchaseCountMax: Joi.number().integer().min(0),
     company: Joi.string().allow('', null),
     videoUrl: Joi.string().allow('', null),
-    shippingTerms: Joi.string().allow('', null),
+    ...productPolicyFields,
   }),
 
   updateStock: Joi.object({
@@ -649,6 +658,21 @@ const adminValidation = {
       instagram: Joi.string().allow('', null),
       facebook: Joi.string().allow('', null),
     }),
+    productTemplates: Joi.object({
+      shippingTerms: Joi.string().allow('').max(5000),
+      warranty: Joi.string().allow('').max(5000),
+      specSets: Joi.array().max(30).items(Joi.object({
+        name: Joi.string().trim().required().max(60),
+        items: Joi.array().max(40).items(Joi.object({
+          key: Joi.string().trim().required().max(100),
+          value: Joi.string().trim().required().max(300),
+        })),
+      })),
+      textBlocks: Joi.array().max(30).items(Joi.object({
+        name: Joi.string().trim().required().max(60),
+        text: Joi.string().allow('').max(5000),
+      })),
+    }),
   }),
 
   updateWebsiteSettings: Joi.object({
@@ -784,9 +808,22 @@ const adminValidation = {
   }),
 
   sendNotification: Joi.object({
-    userIds: Joi.array().items(Joi.string().required()).min(1).required(),
+    // 'selected': the people in userIds; or every customer / wholesaler.
+    audience: Joi.string().valid('selected', 'buyers', 'wholesalers').default('selected'),
+    userIds: Joi.when('audience', {
+      is: 'selected',
+      then: Joi.array().items(Joi.string().required()).min(1).required(),
+      otherwise: Joi.forbidden(),
+    }),
     title: Joi.string().required().max(100),
     body: Joi.string().required().max(500),
+    // Tapping it opens this product or category.
+    link: Joi.object({
+      type: Joi.string().valid('product', 'category').required(),
+      id: Joi.string().trim().required().max(100),
+    }).allow(null),
+    // A picture in the push and the inbox (checked in the controller).
+    imageUrl: Joi.string().trim().uri({ scheme: ['https'] }).max(500).allow('', null),
   }),
 };
 

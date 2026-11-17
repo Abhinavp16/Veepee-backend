@@ -9,6 +9,7 @@ const { PRODUCT_STATUS } = require('../../utils/constants');
 const { updateProductCount } = require('../categoryController');
 const { notifyLaunchAlerts } = require('../../services/productLaunchService');
 const { deleteProductPermanently } = require('../../services/catalogDeletion');
+const { followsCommon, LEGACY_SHIPPING_TERMS } = require('../../services/productTemplates');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const { toStoredWebp } = require('../../utils/imageProcessing');
@@ -240,10 +241,16 @@ exports.getProductById = async (req, res, next) => {
     }
     // How many shoppers tapped "Notify me" (shown while it is coming soon).
     const notifyMeCount = await ProductAlert.countDocuments({ productId: product._id });
+    const data = product.toObject();
+    // Whether it shows the shared Shipping & Returns / Warranty text, worked
+    // out the way shoppers see it (older products never had the switch).
+    data.useCommonShipping = followsCommon(data.useCommonShipping, data.shippingTerms, LEGACY_SHIPPING_TERMS);
+    data.useCommonWarranty = followsCommon(data.useCommonWarranty, data.warranty);
+    if (data.useCommonShipping && data.shippingTerms === LEGACY_SHIPPING_TERMS) data.shippingTerms = '';
 
     res.json({
       success: true,
-      data: { ...product.toObject(), notifyMeCount },
+      data: { ...data, notifyMeCount },
     });
   } catch (error) {
     next(error);

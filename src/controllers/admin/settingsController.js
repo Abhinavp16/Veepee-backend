@@ -60,6 +60,7 @@ exports.updateSettings = async (req, res, next) => {
       'heroBanners',
       'promoBanners',
       'socialLinks',
+      'productTemplates',
       'bankName',
       'bankAccountNumber',
       'bankIfscCode',
@@ -73,6 +74,10 @@ exports.updateSettings = async (req, res, next) => {
         // Merge, so saving one switch never resets the others.
         const current = settings.features?.toObject?.() || settings.features || {};
         settings.features = { ...current, ...req.body.features };
+      } else if (field === 'productTemplates') {
+        // Merge, so saving one part never resets the others.
+        const current = settings.productTemplates?.toObject?.() || settings.productTemplates || {};
+        settings.productTemplates = { ...current, ...req.body.productTemplates };
       } else if (field === 'whatsappAlerts') {
         // Merge; the number is stored as 91XXXXXXXXXX.
         const current = settings.whatsappAlerts?.toObject?.() || settings.whatsappAlerts || {};

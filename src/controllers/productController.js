@@ -1,4 +1,5 @@
-const { Product, Analytics, WebsiteSettings, Company, Category, SubCategory, ProductAlert } = require('../models');
+const { Product, Analytics, WebsiteSettings, Company, Category, SubCategory, ProductAlert, Settings } = require('../models');
+const { productPolicies } = require('../services/productTemplates');
 const { NotFoundError, BadRequestError } = require('../utils/errors');
 const { paginate, formatPaginationResponse } = require('../utils/helpers');
 const { PRODUCT_STATUS, ANALYTICS_EVENTS } = require('../utils/constants');
@@ -305,7 +306,12 @@ exports.getProductBySlug = async (req, res, next) => {
       ...categoryResponse(product),
       ...pricing,
       labels: resolvedLabels,
+      // Shipping & Returns and Warranty as the shopper sees them: the shared
+      // text from Settings, or this product's own.
+      ...productPolicies(product, await Settings.getSettings()),
     };
+    delete responseData.useCommonShipping;
+    delete responseData.useCommonWarranty;
 
     if (pricing.comingSoon && req.user) {
       responseData.notifyMe = Boolean(
@@ -315,7 +321,6 @@ exports.getProductBySlug = async (req, res, next) => {
 
     // The quick picks and lowest price for a wholesaler's bulk negotiation.
     if (userRole === 'wholesaler') {
-      const { Settings } = require('../models');
       responseData.negotiationRules = negotiationRulesFor(await Settings.getSettings());
     }
 

@@ -1,11 +1,11 @@
 const crypto = require('crypto');
-const { User, Order, Negotiation, DeviceToken, Notification, RefreshToken } = require('../../models');
+const { User, Order, Negotiation, DeviceToken, Notification, RefreshToken, Product, Category } = require('../../models');
 const notificationService = require('../../services/notificationService');
 const { claimOpenRequest, releaseClaim, openRequestedAt, historyFor } = require('../../services/passwordResetRequestService');
 const mongoose = require('mongoose');
 const { NotFoundError, BadRequestError, ConflictError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
-const { USER_ROLES, PAID_ORDER_STATUSES } = require('../../utils/constants');
+const { USER_ROLES, PAID_ORDER_STATUSES, PRODUCT_STATUS } = require('../../utils/constants');
 
 const customerRoles = [USER_ROLES.BUYER, USER_ROLES.WHOLESALER];
 // Deleted accounts are not customers any more (see Deletion Requests).
@@ -313,18 +313,101 @@ exports.upgradeCustomer = async (req, res, next) => {
 
 // Sends the admin's message to the selected people: always saved in their
 // in-app inbox, and pushed to every phone they are signed in on.
+// A notification's picture is the linked product's or category's own photo,
+// or one uploaded for notifications to OXON's storage
+// (https://storage.googleapis.com/<OXON's bucket>/notifications/...), never
+// anything else (another bucket, payment proofs, other websites).
+function uploadedNotificationImage(url) {
+  const bucket = process.env.FIREBASE_STORAGE_BUCKET;
+  if (!bucket) return false;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'https:'
+    && parsed.hostname === 'storage.googleapis.com'
+    && parsed.pathname.startsWith(`/${bucket}/notifications/`)
+    && !parsed.pathname.includes('/../')
+    && !parsed.search && !parsed.hash;
+}
+
+/** Who gets it: the selected people, or every customer or wholesaler. */
+async function notificationRecipients({ audience = 'selected', userIds = [] }) {
+  const query = { isActive: { $ne: false }, deletedAt: null };
+  if (audience === 'buyers') query.role = USER_ROLES.BUYER;
+  else if (audience === 'wholesalers') query.role = USER_ROLES.WHOLESALER;
+  else {
+    query._id = {
+      $in: [...new Set(userIds.map(String))].filter((id) => mongoose.Types.ObjectId.isValid(id)),
+    };
+  }
+  const users = await User.find(query).select('_id').lean();
+  return users.map((user) => user._id);
+}
+
+/**
+ * Where tapping it goes, as notification data, and the linked item's photo.
+ * A product link carries no `type`, so app versions from before links still
+ * open the product from the push.
+ */
+async function notificationLink(link) {
+  if (!link) return { data: { type: 'custom_admin_notification' }, image: '' };
+  if (!mongoose.Types.ObjectId.isValid(link.id)) {
+    throw new BadRequestError('The linked item was not found', 'LINK_NOT_FOUND');
+  }
+  if (link.type === 'product') {
+    const product = await Product.findOne({ _id: link.id, status: PRODUCT_STATUS.ACTIVE })
+      .select('name images').lean();
+    if (!product) {
+      throw new BadRequestError('That product is not on sale (archived, draft or deleted). Pick another.', 'LINK_NOT_FOUND');
+    }
+    const images = product.images || [];
+    const photo = (images.find((image) => image.isPrimary) || images[0])?.url || '';
+    return { data: { link: 'product', productId: String(product._id) }, image: photo };
+  }
+  const category = await Category.findOne({ _id: link.id, isActive: { $ne: false } })
+    .select('name slug image').lean();
+  if (!category) throw new BadRequestError('That category was not found', 'LINK_NOT_FOUND');
+  return {
+    data: {
+      type: 'custom_admin_notification',
+      link: 'category',
+      categorySlug: category.slug,
+      categoryName: category.name,
+    },
+    image: category.image?.url || '',
+  };
+}
+
+function checkNotificationImage(imageUrl, linkedImage) {
+  const url = String(imageUrl || '').trim();
+  if (!url || url === linkedImage) return url;
+  if (!uploadedNotificationImage(url)) {
+    throw new BadRequestError('Upload the picture here, or use the product or category photo', 'INVALID_IMAGE');
+  }
+  return url;
+}
+
 exports.sendNotification = async (req, res, next) => {
   try {
     const { title, body } = req.body;
-    const requested = [...new Set(req.body.userIds.map(String))]
-      .filter((id) => mongoose.Types.ObjectId.isValid(id));
-    const users = await User.find({ _id: { $in: requested }, isActive: { $ne: false } }).select('_id').lean();
-    const userIds = users.map((user) => user._id);
+    const { data: linkData, image: linkedImage } = await notificationLink(req.body.link);
+    const imageUrl = checkNotificationImage(req.body.imageUrl, linkedImage);
+
+    const userIds = await notificationRecipients(req.body);
     if (userIds.length === 0) {
-      throw new BadRequestError('None of the selected people can receive notifications', 'NO_RECIPIENTS');
+      throw new BadRequestError(
+        req.body.audience && req.body.audience !== 'selected'
+          ? 'Nobody in that group can receive notifications yet'
+          : 'None of the selected people can receive notifications',
+        'NO_RECIPIENTS'
+      );
     }
 
-    const data = { type: 'custom_admin_notification' };
+    // The inbox copy keeps the picture too, for the app to show.
+    const data = { ...linkData, ...(imageUrl && { imageUrl }) };
     await Notification.insertMany(userIds.map((userId) => ({
       userId, title, body, type: 'general', data,
     })));
@@ -335,7 +418,11 @@ exports.sendNotification = async (req, res, next) => {
     let failed = 0;
     let pushConfigured = Boolean(notificationService.getMessagingInstance());
     if (pushConfigured && fcmTokens.length > 0) {
-      const result = await notificationService.sendToMultipleDevices(fcmTokens, { title, body }, data);
+      const result = await notificationService.sendToMultipleDevices(
+        fcmTokens,
+        { title, body, ...(imageUrl && { imageUrl }) },
+        data
+      );
       if (result === null) {
         pushConfigured = false;
       } else {

@@ -11,6 +11,7 @@ process.env.NODE_ENV = 'test';
 delete process.env.FIREBASE_PROJECT_ID;
 delete process.env.FIREBASE_PRIVATE_KEY;
 delete process.env.FIREBASE_CLIENT_EMAIL;
+process.env.FIREBASE_STORAGE_BUCKET = 'oxon-test';
 
 const uri = process.env.CUSTOM_NOTIFY_TEST_MONGODB_URI;
 if (!uri) {
@@ -36,7 +37,9 @@ async function run() {
   const mongoose = require('mongoose');
   const app = require('../src/app');
   const connectDB = require('../src/config/database');
-  const { User, DeviceToken, Notification } = require('../src/models');
+  const { User, DeviceToken, Notification, Product, Category } = require('../src/models');
+  const madeProducts = [];
+  const madeCategories = [];
   const notificationService = require('../src/services/notificationService');
 
   await connectDB();
@@ -59,8 +62,11 @@ async function run() {
 
   // A fake Firebase: records batches; some tokens are dead, one is flaky.
   const batches = [];
+  let lastMessage = null;
   const fakeMessaging = {
-    async sendEachForMulticast({ tokens }) {
+    async sendEachForMulticast(message) {
+      const { tokens } = message;
+      lastMessage = message;
       batches.push(tokens.length);
       const responses = tokens.map((token) => {
         if (token.startsWith('dead-')) return { success: false, error: { code: 'messaging/registration-token-not-registered' } };
@@ -124,13 +130,112 @@ async function run() {
     });
     assert.strictEqual(res.status, 400);
 
+    // 4. A product link: its photo by default; the push and the inbox both
+    //    carry the picture and the product. No `type`, so older apps open it.
+    const storage = 'https://storage.googleapis.com/oxon-test/products';
+    const product = await Product.create({
+      name: 'CN Pump', category: 'pumps', mrp: 1000, retailPrice: 900, wholesalePrice: 800,
+      sku: `CN-${Date.now()}`, stock: 5, status: 'active',
+      images: [{ url: `${storage}/pump.webp`, publicId: 'products/pump.webp', isPrimary: true }],
+    });
+    const archived = await Product.create({
+      name: 'CN Old Pump', category: 'pumps', mrp: 1000, retailPrice: 900, wholesalePrice: 800,
+      sku: `CN-OLD-${Date.now()}`, stock: 5, status: 'archived',
+    });
+    const category = await Category.create({ name: `CN Sprayers ${Date.now()}`, image: { url: `${storage}/sprayers.webp` } });
+    madeProducts.push(product._id, archived._id);
+    madeCategories.push(category._id);
+    const shopper = await makeUser('buyer');
+    await DeviceToken.create({ userId: shopper.user._id, fcmToken: 'ok-shopper', isActive: true, platform: 'android' });
+    const send = (extra) => call('POST', '/admin/customers/notifications', {
+      token: admin.token,
+      body: { userIds: [String(shopper.user._id)], title: 'New pump', body: 'Have a look', ...extra },
+    });
+
+    res = await send({ link: { type: 'product', id: String(product._id) }, imageUrl: `${storage}/pump.webp` });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(lastMessage.notification.imageUrl, `${storage}/pump.webp`);
+    assert.strictEqual(lastMessage.data.productId, String(product._id));
+    assert.strictEqual(lastMessage.data.link, 'product');
+    assert.strictEqual(lastMessage.data.type, undefined, 'no type: older apps open the product');
+    let saved = await Notification.findOne({ userId: shopper.user._id, title: 'New pump' }).lean();
+    assert.strictEqual(saved.data.productId, String(product._id));
+    assert.strictEqual(saved.data.imageUrl, `${storage}/pump.webp`);
+
+    // 5. A category link, with an uploaded banner instead of its photo.
+    res = await send({ title: 'Sprayers', link: { type: 'category', id: String(category._id) }, imageUrl: 'https://storage.googleapis.com/oxon-test/notifications/diwali.webp' });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(lastMessage.data.link, 'category');
+    assert.strictEqual(lastMessage.data.categorySlug, category.slug);
+    saved = await Notification.findOne({ userId: shopper.user._id, title: 'Sprayers' }).lean();
+    assert.strictEqual(saved.data.categorySlug, category.slug);
+
+    // 6. No picture: none in the push.
+    res = await send({ title: 'Plain', link: { type: 'category', id: String(category._id) }, imageUrl: '' });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.strictEqual(lastMessage.notification.imageUrl, undefined);
+
+    // 7. Refused: an archived product, an unknown category, a picture from
+    //    another website.
+    res = await send({ link: { type: 'product', id: String(archived._id) } });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.json.error?.code || res.json.code, 'LINK_NOT_FOUND');
+    res = await send({ link: { type: 'category', id: String(new mongoose.Types.ObjectId()) } });
+    assert.strictEqual(res.status, 400);
+    res = await send({ imageUrl: 'https://example.com/tracker.png' });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.json.error?.code || res.json.code, 'INVALID_IMAGE');
+    res = await send({ imageUrl: 'http://storage.googleapis.com/oxon-test/notifications/x.webp' });
+    assert.strictEqual(res.status, 400, 'https only');
+    // Only OXON's bucket, and only its notifications folder.
+    for (const imageUrl of [
+      'https://storage.googleapis.com/someone-else/notifications/x.webp',
+      'https://storage.googleapis.com/oxon-test/payments/proof.webp',
+      'https://storage.googleapis.com/oxon-test/notifications/../payments/proof.webp',
+      'https://firebasestorage.googleapis.com/v0/b/other/o/x.webp',
+    ]) {
+      res = await send({ imageUrl });
+      assert.strictEqual(res.status, 400, imageUrl);
+    }
+
+    // 8. Everyone in a group: all customers, or all wholesalers; never staff
+    //    or admins, never deleted accounts.
+    const deleted = await makeUser('buyer');
+    await User.updateOne({ _id: deleted.user._id }, { $set: { deletedAt: new Date() } });
+    res = await call('POST', '/admin/customers/notifications', {
+      token: admin.token, body: { audience: 'wholesalers', title: 'Wholesale only', body: 'Hi' },
+    });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    const wholesaleInbox = await Notification.find({ title: 'Wholesale only' }).select('userId').lean();
+    const wholesaleIds = new Set(wholesaleInbox.map((n) => String(n.userId)));
+    assert.ok(wholesaleIds.has(String(noPhone.user._id)), 'the wholesaler got it');
+    assert.ok(!wholesaleIds.has(String(shopper.user._id)), 'a customer did not');
+    assert.ok(!wholesaleIds.has(String(admin.user._id)), 'the admin did not');
+    res = await call('POST', '/admin/customers/notifications', {
+      token: admin.token, body: { audience: 'buyers', title: 'Customers only', body: 'Hi' },
+    });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    const buyerIds = new Set((await Notification.find({ title: 'Customers only' }).select('userId').lean()).map((n) => String(n.userId)));
+    assert.ok(buyerIds.has(String(shopper.user._id)));
+    assert.ok(!buyerIds.has(String(deleted.user._id)), 'deleted accounts are skipped');
+    assert.ok(!buyerIds.has(String(noPhone.user._id)), 'a wholesaler did not');
+    // A group and a list at once is refused.
+    res = await call('POST', '/admin/customers/notifications', {
+      token: admin.token, body: { audience: 'buyers', userIds: [String(shopper.user._id)], title: 'X', body: 'Y' },
+    });
+    assert.strictEqual(res.status, 400);
+
     console.log('customNotification.test.js: all checks passed');
   } finally {
     notificationService.messaging = null;
+    // Group sends reached people from other tests in this database too.
+    await Notification.deleteMany({ title: { $in: ['Wholesale only', 'Customers only'] } });
     await Promise.all([
       DeviceToken.deleteMany({ userId: { $in: made } }),
       Notification.deleteMany({ userId: { $in: made } }),
       User.deleteMany({ _id: { $in: made } }),
+      Product.deleteMany({ _id: { $in: madeProducts } }),
+      Category.deleteMany({ _id: { $in: madeCategories } }),
     ]);
     server.close();
     await mongoose.disconnect();

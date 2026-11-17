@@ -173,9 +173,20 @@ const productSchema = new mongoose.Schema({
     trim: true,
   },
 
+  // Shipping & Returns and Warranty: the shared text from Settings → Product
+  // templates (useCommon… true, the default for new products), or this
+  // product's own (false; empty shows nothing). See services/productTemplates.
   shippingTerms: {
     type: String,
-    default: 'Free shipping on orders above ₹5,000. Standard delivery within 5-7 business days. Express delivery available at additional cost.\n\nReturn Policy: Products can be returned within 7 days of delivery if unused and in original packaging. Damaged or defective items will be replaced free of charge. Refunds are processed within 5-7 business days after the returned item is received and inspected.',
+  },
+  useCommonShipping: {
+    type: Boolean,
+  },
+  warranty: {
+    type: String,
+  },
+  useCommonWarranty: {
+    type: Boolean,
   },
 
   metaTitle: {

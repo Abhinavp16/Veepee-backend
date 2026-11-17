@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { LEGACY_SHIPPING_TERMS, DEFAULT_WARRANTY } = require('../services/productTemplates');
 
 // Forced-update rule for one platform. The app compares build numbers only;
 // `latestVersion` is display text.
@@ -147,6 +148,41 @@ const settingsSchema = new mongoose.Schema({
   bankTransferEnabled: {
     type: Boolean,
     default: true,
+  },
+
+  // Text most products share, typed once (Settings → Product templates):
+  // Shipping & Returns and Warranty show on every product that uses them;
+  // specification sets and text blocks are copied into a product as it is
+  // written.
+  productTemplates: {
+    shippingTerms: { type: String, default: LEGACY_SHIPPING_TERMS },
+    warranty: { type: String, default: DEFAULT_WARRANTY },
+    specSets: {
+      type: [{
+        _id: false,
+        name: { type: String, required: true, trim: true },
+        items: [{ _id: false, key: { type: String, trim: true }, value: { type: String, trim: true } }],
+      }],
+      default: [{
+        name: 'Standard OXON',
+        items: [
+          { key: 'Brand', value: 'OXON' },
+          { key: 'Country of origin', value: 'India' },
+          { key: 'Manufacturer / Marketer', value: 'Veepee Impex' },
+        ],
+      }],
+    },
+    textBlocks: {
+      type: [{
+        _id: false,
+        name: { type: String, required: true, trim: true },
+        text: { type: String, default: '' },
+      }],
+      default: [{
+        name: 'Genuine product note',
+        text: '100% genuine OXON product, sold and supported by Veepee Impex.',
+      }],
+    },
   },
 }, {
   timestamps: true,

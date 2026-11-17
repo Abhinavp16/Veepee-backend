@@ -21,6 +21,7 @@ const adminReviewController = require('../controllers/admin/reviewController');
 const adminAccountDeletionController = require('../controllers/admin/accountDeletionController');
 const adminPasswordResetRequestController = require('../controllers/admin/passwordResetRequestController');
 const staffController = require('../controllers/admin/staffController');
+const whatsNewController = require('../controllers/admin/whatsNewController');
 const { adminValidation } = require('../validations');
 
 const optionalUpload = (multerMiddleware) => (req, res, next) => {
@@ -134,6 +135,10 @@ router.get('/notifications', operationsStaff, adminNotificationController.listNo
 router.post('/notifications/mark-read', operationsStaff, validate(adminValidation.markNotificationsRead), adminNotificationController.markRead);
 router.post('/notifications/register-token', operationsStaff, validate(adminValidation.webPushToken), adminNotificationController.registerWebToken);
 router.post('/notifications/unregister-token', operationsStaff, validate(adminValidation.webPushToken), adminNotificationController.unregisterWebToken);
+
+// "What's new" in the admin panel: which new features this person has seen.
+router.get('/whats-new/seen', operationsStaff, whatsNewController.getSeen);
+router.post('/whats-new/seen', operationsStaff, validate(adminValidation.whatsNewSeen), whatsNewController.markSeen);
 
 router.get('/discounts', administrator, adminDiscountController.listDiscounts);
 router.put('/discounts/:kind/:id', administrator, validate(adminValidation.setDiscount), adminDiscountController.setDiscount);

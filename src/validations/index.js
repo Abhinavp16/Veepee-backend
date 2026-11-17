@@ -583,6 +583,15 @@ const adminValidation = {
     ids: Joi.array().items(objectId).max(200),
   }),
 
+  // Ids from the admin panel's "What's new" list (lib/whats-new.ts).
+  whatsNewSeen: Joi.object({
+    ids: Joi.array()
+      .items(Joi.string().pattern(/^[a-z0-9][a-z0-9_-]{0,63}$/).required())
+      .min(1)
+      .max(50)
+      .required(),
+  }),
+
   webPushToken: Joi.object({
     fcmToken: Joi.string().max(4096).required(),
   }),

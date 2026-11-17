@@ -156,6 +156,10 @@ const userSchema = new mongoose.Schema({
     default: 'en',
   },
 
+  // Admin panel "What's new": ids of the new admin features this staff
+  // member has already seen, so the highlights clear on every device.
+  seenFeatures: { type: [String], default: [] },
+
   isActive: {
     type: Boolean,
     default: true,

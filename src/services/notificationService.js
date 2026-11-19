@@ -123,10 +123,21 @@ class NotificationService {
       // Firebase takes at most 500 tokens per call.
       let successCount = 0;
       let failureCount = 0;
+      let batchErrors = 0;
       const deadTokens = [];
       for (let start = 0; start < fcmTokens.length; start += FCM_BATCH_SIZE) {
         const batch = fcmTokens.slice(start, start + FCM_BATCH_SIZE);
-        const result = await messaging.sendEachForMulticast({ tokens: batch, ...message });
+        let result;
+        try {
+          result = await messaging.sendEachForMulticast({ tokens: batch, ...message });
+        } catch (error) {
+          // One batch failing (network, quota) doesn't stop the others; its
+          // phones count as failed.
+          console.error('FCM batch failed:', error.message);
+          failureCount += batch.length;
+          batchErrors += 1;
+          continue;
+        }
         successCount += result.successCount;
         failureCount += result.failureCount;
         result.responses.forEach((resp, idx) => {
@@ -138,12 +149,81 @@ class NotificationService {
       console.log(`Notifications sent: ${successCount} success, ${failureCount} failure`);
       if (deadTokens.length > 0) await this.removeInvalidTokens(deadTokens);
 
-      const response = { successCount, failureCount };
+      const response = { successCount, failureCount, batchErrors };
       return response;
     } catch (error) {
       console.error('Error sending multicast notification:', error);
       throw error;
     }
+  }
+
+  /**
+   * A different message for each phone ([{ token, notification, data }]),
+   * e.g. with each person's name or in their language. Sent with FCM
+   * sendEach, at most 500 per call; dead tokens are switched off.
+   * Returns null when Firebase is not set up.
+   */
+  async sendEachToDevices(messages) {
+    const messaging = this.getMessagingInstance();
+    if (!messaging) {
+      console.warn('FCM not configured, skipping notification');
+      return null;
+    }
+    if (!messages || messages.length === 0) return { successCount: 0, failureCount: 0 };
+
+    const full = messages.map(({ token, notification, data }) => ({
+      token,
+      notification: {
+        title: notification.title,
+        body: notification.body,
+        ...(notification.imageUrl && { imageUrl: notification.imageUrl }),
+      },
+      data: {
+        ...normalizeFcmData(data),
+        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'veepee_default',
+          priority: 'high',
+          defaultSound: true,
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+    }));
+
+    let successCount = 0;
+    let failureCount = 0;
+    let batchErrors = 0;
+    const deadTokens = [];
+    for (let start = 0; start < full.length; start += FCM_BATCH_SIZE) {
+      const batch = full.slice(start, start + FCM_BATCH_SIZE);
+      let result;
+      try {
+        result = await messaging.sendEach(batch);
+      } catch (error) {
+        console.error('FCM batch failed:', error.message);
+        failureCount += batch.length;
+        batchErrors += 1;
+        continue;
+      }
+      successCount += result.successCount;
+      failureCount += result.failureCount;
+      result.responses.forEach((resp, idx) => {
+        if (!resp.success && DEAD_TOKEN_CODES.has(resp.error?.code)) deadTokens.push(batch[idx].token);
+      });
+    }
+    console.log(`Personal notifications sent: ${successCount} success, ${failureCount} failure`);
+    if (deadTokens.length > 0) await this.removeInvalidTokens(deadTokens);
+    return { successCount, failureCount, batchErrors };
   }
 
   async sendToUser(userId, notification, data = {}) {

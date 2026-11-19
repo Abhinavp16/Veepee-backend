@@ -381,6 +381,7 @@ router.use('/categories', categoryRoutes);
 router.use('/sub-categories', require('./subCategoryRoutes'));
 router.use('/upload', uploadRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/wishlist', require('./wishlistRoutes'));
 
 // A wholesaler's price request or order, sent on to OXON's WhatsApp.
 router.get('/whatsapp-alert', protect, authorize('wholesaler'), oxonWhatsAppController.getAlert);

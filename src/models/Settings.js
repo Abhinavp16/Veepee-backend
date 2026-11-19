@@ -1,5 +1,25 @@
 const mongoose = require('mongoose');
 const { LEGACY_SHIPPING_TERMS, DEFAULT_WARRANTY } = require('../services/productTemplates');
+const { DEFAULT_NOTIFICATION_TEMPLATES } = require('../utils/customNotificationDefaults');
+
+// What a saved notification opens: { type: 'page', page } or
+// { type: 'product' | 'category' | 'sale', id, name }.
+const notificationTemplateLinkSchema = new mongoose.Schema({
+  type: { type: String, enum: ['product', 'category', 'sale', 'page'], required: true },
+  id: { type: String, default: undefined },
+  page: { type: String, default: undefined },
+  name: { type: String, default: undefined },
+}, { _id: false });
+
+const notificationTemplateSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true },
+  title: { type: String, default: '' },
+  body: { type: String, default: '' },
+  titleHi: { type: String, default: '' },
+  bodyHi: { type: String, default: '' },
+  link: { type: notificationTemplateLinkSchema, default: null },
+  imageUrl: { type: String, default: '' },
+}, { _id: false });
 
 // Forced-update rule for one platform. The app compares build numbers only;
 // `latestVersion` is display text.
@@ -183,6 +203,15 @@ const settingsSchema = new mongoose.Schema({
         text: '100% genuine OXON product, sold and supported by Veepee Impex.',
       }],
     },
+  },
+
+  // Customers → Custom notification: saved messages to start from (up to
+  // 50). {name} becomes each person's first name when sent. Coupons are
+  // never saved here (they end); the link may be a page, product, category
+  // or sale.
+  notificationTemplates: {
+    type: [notificationTemplateSchema],
+    default: () => DEFAULT_NOTIFICATION_TEMPLATES.map((template) => ({ ...template })),
   },
 }, {
   timestamps: true,

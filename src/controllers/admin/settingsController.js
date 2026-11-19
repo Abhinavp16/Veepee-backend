@@ -61,6 +61,7 @@ exports.updateSettings = async (req, res, next) => {
       'promoBanners',
       'socialLinks',
       'productTemplates',
+      'notificationTemplates',
       'bankName',
       'bankAccountNumber',
       'bankIfscCode',
@@ -78,6 +79,15 @@ exports.updateSettings = async (req, res, next) => {
         // Merge, so saving one part never resets the others.
         const current = settings.productTemplates?.toObject?.() || settings.productTemplates || {};
         settings.productTemplates = { ...current, ...req.body.productTemplates };
+      } else if (field === 'notificationTemplates') {
+        // The whole list of saved messages; nothing else changes.
+        settings.notificationTemplates = req.body.notificationTemplates.map((template) => ({
+          ...template,
+          titleHi: template.titleHi || '',
+          bodyHi: template.bodyHi || '',
+          imageUrl: template.imageUrl || '',
+          link: template.link || null,
+        }));
       } else if (field === 'whatsappAlerts') {
         // Merge; the number is stored as 91XXXXXXXXXX.
         const current = settings.whatsappAlerts?.toObject?.() || settings.whatsappAlerts || {};

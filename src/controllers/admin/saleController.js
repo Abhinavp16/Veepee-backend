@@ -57,6 +57,8 @@ function listItem(sale, results) {
     name: sale.name,
     nameHindi: sale.nameHindi || '',
     theme: sale.theme,
+    // The banner, e.g. for the sale picker in Custom notification.
+    heroImageUrl: sale.heroImageUrl || '',
     audience: sale.audience,
     status: saleStatus(sale),
     startsAt: sale.startsAt,

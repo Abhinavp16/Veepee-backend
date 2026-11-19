@@ -1,5 +1,6 @@
 const Joi = require('joi');
 const { validateIndianPhoneJoi } = require('../utils/phoneValidator');
+const { NOTIFICATION_PAGES, MAX_NOTIFICATION_TEMPLATES, MAX_CHOSEN_PEOPLE } = require('../utils/customNotificationDefaults');
 
 const indianPhone = Joi.string()
   .custom(validateIndianPhoneJoi)
@@ -46,6 +47,47 @@ const platformUpdate = Joi.object({
   suggestBuildNumber: Joi.number().integer().min(0),
   suggestMessage: Joi.string().allow('').max(300),
 });
+
+// Custom notifications: what tapping one opens. A product, category or sale
+// by id, or a page of the app.
+const notificationLink = Joi.object({
+  type: Joi.string().valid('product', 'category', 'sale', 'page').required(),
+  id: Joi.when('type', {
+    is: 'page',
+    then: Joi.any().strip(),
+    otherwise: Joi.string().trim().required().max(100),
+  }),
+  page: Joi.when('type', {
+    is: 'page',
+    then: Joi.string().valid(...NOTIFICATION_PAGES).required(),
+    otherwise: Joi.any().strip(),
+  }),
+});
+
+// Who gets a custom notification. 'selected': the people in userIds; buyers /
+// wholesalers: every customer / wholesaler; cart: everyone with something in
+// their cart; saved: everyone who saved productId. cart and saved can be
+// narrowed to customers or wholesalers (segment).
+const notificationAudience = {
+  audience: Joi.string().valid('selected', 'buyers', 'wholesalers', 'cart', 'saved').default('selected'),
+  userIds: Joi.when('audience', {
+    is: 'selected',
+    // More than this: send to a group instead.
+    then: Joi.array().items(Joi.string().required()).min(1).max(MAX_CHOSEN_PEOPLE).required()
+      .messages({ 'array.max': `Choose up to ${MAX_CHOSEN_PEOPLE} people, or send to a group (All customers, All wholesalers)` }),
+    otherwise: Joi.forbidden(),
+  }),
+  segment: Joi.when('audience', {
+    is: Joi.valid('cart', 'saved'),
+    then: Joi.string().valid('all', 'buyers', 'wholesalers').default('all'),
+    otherwise: Joi.any().strip(),
+  }),
+  productId: Joi.when('audience', {
+    is: 'saved',
+    then: objectId.required().messages({ 'any.required': 'Pick the product people saved', 'string.pattern.base': 'Pick the product people saved' }),
+    otherwise: Joi.any().strip(),
+  }),
+};
 
 const discountRuleSchema = Joi.object({
   minPurchaseAmount: Joi.number().min(0).required(),
@@ -817,22 +859,54 @@ const adminValidation = {
   }),
 
   sendNotification: Joi.object({
-    // 'selected': the people in userIds; or every customer / wholesaler.
-    audience: Joi.string().valid('selected', 'buyers', 'wholesalers').default('selected'),
-    userIds: Joi.when('audience', {
-      is: 'selected',
-      then: Joi.array().items(Joi.string().required()).min(1).required(),
-      otherwise: Joi.forbidden(),
-    }),
+    ...notificationAudience,
     title: Joi.string().required().max(100),
     body: Joi.string().required().max(500),
-    // Tapping it opens this product or category.
-    link: Joi.object({
-      type: Joi.string().valid('product', 'category').required(),
-      id: Joi.string().trim().required().max(100),
-    }).allow(null),
+    // The Hindi text, for people whose app is in Hindi: both or neither
+    // (checked in the controller, so an empty pair counts as neither).
+    titleHi: Joi.string().trim().max(100).allow('', null),
+    bodyHi: Joi.string().trim().max(500).allow('', null),
+    // Tapping it opens this product, category, sale or app page.
+    link: notificationLink.allow(null),
+    // An active coupon; " Use code CODE." is added to the message.
+    couponCode: Joi.string().trim().uppercase().max(40).allow('', null),
     // A picture in the push and the inbox (checked in the controller).
     imageUrl: Joi.string().trim().uri({ scheme: ['https'] }).max(500).allow('', null),
+    // The admin form's id for this send; the same id is never sent twice.
+    sendId: Joi.string().trim().pattern(/^[A-Za-z0-9-]{8,64}$/).allow('', null),
+  }),
+
+  // How many people (and phones) a notification would reach. The page link
+  // is optional: a customers-only or wholesalers-only page leaves the other
+  // accounts out of a "chosen people" list.
+  notificationCount: Joi.object({
+    ...notificationAudience,
+    link: notificationLink.allow(null),
+  }),
+
+  notificationHistory: Joi.object({
+    page: Joi.number().integer().min(1),
+    limit: Joi.number().integer().min(1).max(50),
+  }),
+};
+
+adminValidation.updateSettings = adminValidation.updateSettings.keys({
+  // Customers → Custom notification → saved messages (the whole list).
+  notificationTemplates: Joi.array().max(MAX_NOTIFICATION_TEMPLATES).items(Joi.object({
+    name: Joi.string().trim().required().max(60),
+    title: Joi.string().allow('').max(100).default(''),
+    body: Joi.string().allow('').max(500).default(''),
+    titleHi: Joi.string().allow('', null).max(100).default(''),
+    bodyHi: Joi.string().allow('', null).max(500).default(''),
+    link: notificationLink.keys({ name: Joi.string().allow('').max(200) }).allow(null).default(null),
+    imageUrl: Joi.string().trim().uri({ scheme: ['https'] }).max(500).allow('', null).default(''),
+  })),
+});
+
+const wishlistValidation = {
+  replace: Joi.object({
+    productIds: Joi.array().items(objectId.messages({ 'string.pattern.base': 'Each product id must be a valid id' }))
+      .max(500).required(),
   }),
 };
 
@@ -843,4 +917,5 @@ module.exports = {
   negotiationValidation,
   orderValidation,
   adminValidation,
+  wishlistValidation,
 };

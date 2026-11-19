@@ -115,12 +115,15 @@ router.put('/payments/:id/reject', administrator, validate(adminValidation.rejec
 
 // Staff may only read customer records; account changes and notifications are Administrator-only.
 router.get('/customers', operationsStaff, adminCustomerController.getCustomers);
+// Before /customers/:id, so "notifications" is never read as an id.
+router.get('/customers/notifications/history', administrator, validate(adminValidation.notificationHistory, 'query'), adminCustomerController.notificationHistory);
 router.get('/customers/:id', operationsStaff, adminCustomerController.getCustomerById);
 router.put('/customers/:id/upgrade', administrator, validate(adminValidation.upgradeCustomer), adminCustomerController.upgradeCustomer);
 router.put('/customers/:id/account-type', administrator, validate(adminValidation.updateCustomerAccountType), adminCustomerController.updateCustomerAccountType);
 router.post('/customers/:id/reset-password', administrator, adminCustomerController.resetCustomerPassword);
 router.get('/password-reset-requests', administrator, adminPasswordResetRequestController.getRequests);
 router.post('/customers/notifications', administrator, validate(adminValidation.sendNotification), adminCustomerController.sendNotification);
+router.post('/customers/notifications/count', administrator, validate(adminValidation.notificationCount), adminCustomerController.notificationCount);
 
 // The summary is sufficient for operational context; all other analytics remain Administrator-only.
 router.get('/analytics/dashboard', operationsStaff, adminAnalyticsController.getDashboardStats);

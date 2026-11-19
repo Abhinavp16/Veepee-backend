@@ -160,6 +160,15 @@ const userSchema = new mongoose.Schema({
   // member has already seen, so the highlights clear on every device.
   seenFeatures: { type: [String], default: [] },
 
+  // Products saved in the app's wishlist (up to 500), newest last. Kept on
+  // the account so it follows them to any phone; read it from
+  // GET /wishlist. Admin can notify everyone who saved a product.
+  wishlist: {
+    type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+    default: [],
+    select: false,
+  },
+
   isActive: {
     type: Boolean,
     default: true,
@@ -179,6 +188,8 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ role: 1 });
 userSchema.index({ googleId: 1 }, { sparse: true });
+// "Everyone who saved this product" (admin notifications).
+userSchema.index({ wishlist: 1 });
 userSchema.index({ 'businessInfo.businessName': 'text' });
 
 userSchema.pre('save', async function (next) {

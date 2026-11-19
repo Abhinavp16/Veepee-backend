@@ -11,6 +11,7 @@ const {
   LeadContact,
   Analytics,
   StockLog,
+  User,
 } = require('../models');
 const { deleteImage } = require('../config/cloudinary');
 const { getStorage } = require('../config/firebase');
@@ -105,6 +106,8 @@ async function deleteProductPermanently(product) {
     LeadContact.deleteMany({ productId: id }),
     Analytics.deleteMany({ productId: id }),
     StockLog.deleteMany({ productId: id }),
+    // Off everyone's wishlist too.
+    User.updateMany({ wishlist: id }, { $pull: { wishlist: id } }),
   ]);
   if (!ordered && !negotiated) {
     for (const publicId of publicIds) await deleteImageIfUnused(publicId);

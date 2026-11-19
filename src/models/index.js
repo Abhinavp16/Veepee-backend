@@ -27,10 +27,12 @@ const ShareLink = require('./ShareLink');
 const LeadContact = require('./LeadContact');
 const Sale = require('./Sale');
 const SaleClaim = require('./SaleClaim');
+const NotificationCampaign = require('./NotificationCampaign');
 
 module.exports = {
   Sale,
   SaleClaim,
+  NotificationCampaign,
   LeadContact,
   User,
   Product,

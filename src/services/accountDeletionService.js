@@ -174,6 +174,7 @@ async function completeRequest({ requestId, adminUserId, staffNote = '', identit
   user.address = null;
   user.savedAddresses = [];
   user.selectedAddressId = null;
+  user.wishlist = [];
   user.avatar = null;
   user.googleId = undefined;
   user.passwordHash = undefined;

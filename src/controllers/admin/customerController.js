@@ -5,6 +5,7 @@ const { sendCustomNotification, countRecipients } = require('../../services/cust
 const { claimOpenRequest, releaseClaim, openRequestedAt, historyFor } = require('../../services/passwordResetRequestService');
 const { NotFoundError, BadRequestError, ConflictError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse } = require('../../utils/helpers');
+const { withSignedProofs, withoutProofs, proofsForViewer } = require('../../services/proofStorage');
 const { USER_ROLES, PAID_ORDER_STATUSES } = require('../../utils/constants');
 
 const customerRoles = [USER_ROLES.BUYER, USER_ROLES.WHOLESALER];
@@ -42,7 +43,8 @@ exports.getCustomers = async (req, res, next) => {
 
     res.json({
       success: true,
-      ...formatPaginationResponse(customers, total, page, limit),
+      // Proof photos are only in a customer's details (as signed links).
+      ...formatPaginationResponse(customers.map(withoutProofs), total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -93,7 +95,8 @@ exports.getCustomerById = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        ...customer,
+        // Proof photos: signed links for admins, left out for staff.
+        ...(await proofsForViewer(customer, req.user)),
         openNegotiations: (negotiationStats.find((n) => n._id === 'pending')?.count || 0)
           + (negotiationStats.find((n) => n._id === 'countered')?.count || 0),
         stats: {
@@ -236,7 +239,7 @@ exports.updateCustomerAccountType = async (req, res, next) => {
       .sendLocalizedToUser(customer._id, template, { reason }, { type: 'account_update', event: 'ROLE_UPDATED', role: customer.role })
       .catch((error) => console.error('Account type notification failed:', error.message));
 
-    const plain = customer.toObject();
+    const plain = await withSignedProofs(customer.toObject());
     delete plain.fcmTokens;
     delete plain.passwordHash;
     res.json({
@@ -249,33 +252,51 @@ exports.updateCustomerAccountType = async (req, res, next) => {
   }
 };
 
+const formatIndiaDate = (value) => new Date(value).toLocaleDateString('en-IN', {
+  day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
+});
+
+/** "This application was already handled by Asha on 21 Nov 2026." */
+const alreadyHandledMessage = (info = {}) => {
+  if (info?.status === 'removed') {
+    return `This application was already handled: wholesale access was removed${info.removedAt ? ` on ${formatIndiaDate(info.removedAt)}` : ''}.`;
+  }
+  const by = info?.reviewedBy?.name;
+  const at = info?.reviewedAt;
+  if (!by && !at) return 'This application was already handled.';
+  return `This application was already handled${by ? ` by ${by}` : ''}${at ? ` on ${formatIndiaDate(at)}` : ''}.`;
+};
+
 exports.upgradeCustomer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { action } = req.body;
 
-    const customer = await User.findOne({ _id: id, ...customerQuery });
+    // Only a waiting application is decided, in one step, so two admins (or
+    // a double tap) can't both decide it.
+    const now = new Date();
+    const decision = action === 'accept'
+      ? { role: USER_ROLES.WHOLESALER, 'businessInfo.status': 'accepted', 'businessInfo.verified': true, 'businessInfo.verifiedAt': now }
+      // Details are kept so admin sees the history and the customer can apply again.
+      : { 'businessInfo.status': 'rejected', 'businessInfo.verified': false };
+    const customer = await User.findOneAndUpdate(
+      { $and: [{ _id: id }, customerQuery, applicationFilters.pending] },
+      {
+        $set: {
+          ...decision,
+          // Who decided, and when (admin only; see sanitizeUser).
+          'businessInfo.reviewedAt': now,
+          'businessInfo.reviewedBy': { id: req.user._id, name: req.user.name || '' },
+        },
+      },
+      { new: true, runValidators: true }
+    );
 
     if (!customer) {
-      throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+      const existing = await User.findOne({ _id: id, ...customerQuery }).select('businessInfo').lean();
+      if (!existing) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+      throw new ConflictError(alreadyHandledMessage(existing.businessInfo), 'APPLICATION_NOT_PENDING');
     }
-
-    if (action === 'accept') {
-      customer.role = 'wholesaler';
-      if (customer.businessInfo) {
-        customer.businessInfo.status = 'accepted';
-        customer.businessInfo.verified = true;
-        customer.businessInfo.verifiedAt = new Date();
-      }
-    } else if (action === 'reject') {
-      if (customer.businessInfo) {
-        customer.businessInfo.status = 'rejected';
-        customer.businessInfo.verified = false;
-        // Keep data so admin can see history and user can see rejection details
-      }
-    }
-
-    await customer.save();
 
     if (customer.fcmTokens && customer.fcmTokens.length > 0) {
       const { getMessaging } = require('../../config/firebase');
@@ -302,9 +323,102 @@ exports.upgradeCustomer = async (req, res, next) => {
       }
     }
 
+    const plain = customer.toObject();
+    delete plain.fcmTokens;
+    delete plain.passwordHash;
     res.json({
       success: true,
-      message: `Customer application ${action}ed successfully.`
+      message: `Customer application ${action}ed successfully.`,
+      data: await withSignedProofs(applicationView(plain)),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Wholesaler applications (Account Upgrades), by businessInfo.status.
+const APPLICATION_STATUSES = ['pending', 'accepted', 'rejected', 'removed'];
+const applicationFilters = {
+  // Also customers from before application statuses existed: a business
+  // name and no status at all.
+  pending: {
+    $or: [
+      { 'businessInfo.status': 'pending' },
+      { role: USER_ROLES.BUYER, 'businessInfo.status': null, 'businessInfo.businessName': { $nin: [null, ''] } },
+    ],
+  },
+  accepted: { 'businessInfo.status': 'accepted' },
+  rejected: { 'businessInfo.status': 'rejected' },
+  removed: { 'businessInfo.status': 'removed' },
+};
+// Newest first: when they applied (pending), were decided on (accepted,
+// rejected) or removed; older records without these use their last update.
+const applicationSortKeys = {
+  pending: ['$businessInfo.appliedAt'],
+  accepted: ['$businessInfo.reviewedAt', '$businessInfo.verifiedAt', '$businessInfo.appliedAt'],
+  rejected: ['$businessInfo.reviewedAt', '$businessInfo.appliedAt'],
+  removed: ['$businessInfo.removedAt'],
+};
+const APPLICATION_FIELDS = ['name', 'email', 'phone', 'role', 'isActive', 'businessInfo', 'createdAt', 'updatedAt'];
+
+/** What admin sees of an applicant (no password, tokens or saved data). */
+const applicationView = (user) => {
+  const view = { _id: user._id };
+  for (const field of APPLICATION_FIELDS) view[field] = user[field];
+  const status = user.businessInfo?.status;
+  // The status the list files it under (older records have none).
+  view.applicationStatus = APPLICATION_STATUSES.includes(status) ? status : 'pending';
+  return view;
+};
+
+/**
+ * GET /admin/wholesaler-applications?status=pending|accepted|rejected|removed
+ * &search=&page=&limit= (admin only). Newest first, with the number in each
+ * status; proof photos are signed links that work for 15 minutes.
+ */
+exports.getWholesalerApplications = async (req, res, next) => {
+  try {
+    const status = APPLICATION_STATUSES.includes(req.query.status) ? req.query.status : 'pending';
+    const search = String(req.query.search || '').trim();
+    const { page, limit, skip } = paginate(req.query.page, req.query.limit);
+
+    const conditions = [customerQuery, applicationFilters[status]];
+    if (search) {
+      const pattern = new RegExp(escapeRegex(search), 'i');
+      conditions.push({
+        $or: [
+          { name: pattern },
+          { email: pattern },
+          { phone: pattern },
+          { 'businessInfo.businessName': pattern },
+          { 'businessInfo.gstNumber': pattern },
+          { 'businessInfo.contactPerson': pattern },
+          { 'businessInfo.contactPhone': pattern },
+        ],
+      });
+    }
+    const match = { $and: conditions };
+    const sortAt = applicationSortKeys[status].reduceRight((fallback, key) => ({ $ifNull: [key, fallback] }), '$updatedAt');
+    const projection = Object.fromEntries(APPLICATION_FIELDS.map((field) => [field, 1]));
+
+    const [items, total, ...counts] = await Promise.all([
+      User.aggregate([
+        { $match: match },
+        { $addFields: { sortAt } },
+        { $sort: { sortAt: -1, _id: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        { $project: projection },
+      ]),
+      User.countDocuments(match),
+      ...APPLICATION_STATUSES.map((key) => User.countDocuments({ $and: [customerQuery, applicationFilters[key]] })),
+    ]);
+
+    const data = await Promise.all(items.map((item) => withSignedProofs(applicationView(item))));
+    res.json({
+      success: true,
+      ...formatPaginationResponse(data, total, page, limit),
+      counts: Object.fromEntries(APPLICATION_STATUSES.map((key, index) => [key, counts[index]])),
     });
   } catch (error) {
     next(error);

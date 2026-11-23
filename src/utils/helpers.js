@@ -71,8 +71,12 @@ const sanitizeUser = (user) => {
   delete userObj.accountTypeHistory;
   delete userObj.passwordResets;
   delete userObj.tempPasswordFailures;
-  if (userObj.businessInfo && !userObj.businessInfo.removalReasonShared) {
-    userObj.businessInfo = { ...userObj.businessInfo, removalReason: null };
+  if (userObj.businessInfo) {
+    // Proof photos are private (admins see them through signed links), and
+    // who reviewed an application (and earlier decisions) stays with the team.
+    const { proofImages, reviewedBy, previousApplications, ...businessInfo } = userObj.businessInfo;
+    if (!businessInfo.removalReasonShared) businessInfo.removalReason = null;
+    userObj.businessInfo = businessInfo;
   }
   return userObj;
 };

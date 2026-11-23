@@ -6,6 +6,18 @@ const indianPhone = Joi.string()
   .custom(validateIndianPhoneJoi)
   .messages({ 'any.invalid': 'Please provide a valid Indian mobile number' });
 
+// A typed contact number ("+91 98765 43210", "098765-43210") as the same
+// strict 10-digit Indian mobile, saved as the 10 digits.
+const typedIndianPhone = Joi.string()
+  .trim()
+  .custom((value, helpers) => {
+    let digits = value.replace(/[\s\-().]/g, '');
+    if (/^\+?91\d{10}$/.test(digits)) digits = digits.slice(-10);
+    else if (/^0\d{10}$/.test(digits)) digits = digits.slice(1);
+    return validateIndianPhoneJoi(digits, helpers);
+  })
+  .messages({ 'any.invalid': 'Enter a valid 10-digit mobile number' });
+
 const objectId = Joi.string().pattern(/^[0-9a-fA-F]{24}$/);
 const categoryIds = Joi.alternatives().try(
   Joi.array().items(objectId).min(1),
@@ -229,8 +241,10 @@ const authValidation = {
     businessName: Joi.string().required().max(200),
     gstNumber: Joi.string().allow('', null).max(15),
     businessAddress: Joi.string().required().max(500),
-    contactPerson: Joi.string().required().max(100),
-    phone: Joi.string().required(),
+    contactPerson: Joi.string().trim().required().max(100),
+    // The business's contact number (saved as businessInfo.contactPhone; the
+    // account's own phone never changes here).
+    phone: typedIndianPhone.required(),
   }),
 };
 
@@ -512,7 +526,12 @@ const adminValidation = {
     stock: Joi.number().integer().min(0),
     adjustment: Joi.string().pattern(/^[+-]\d+$/),
     reason: Joi.string().max(200),
-  }).or('stock', 'adjustment'),
+    // With `stock`: the number the admin started from; refused if stock has
+    // changed since (an order came in).
+    expectedStock: Joi.number().integer().min(0),
+  })
+    .or('stock', 'adjustment')
+    .with('expectedStock', 'stock'),
 
   priceChange: Joi.object({
     retailPrice: Joi.number().min(0),
@@ -561,6 +580,13 @@ const adminValidation = {
 
   upgradeCustomer: Joi.object({
     action: Joi.string().valid('accept', 'reject').required(),
+  }),
+
+  wholesalerApplications: Joi.object({
+    status: Joi.string().valid('pending', 'accepted', 'rejected', 'removed').default('pending'),
+    search: Joi.string().trim().max(100).allow('', null),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(50).default(20),
   }),
 
   updateCustomerAccountType: Joi.object({

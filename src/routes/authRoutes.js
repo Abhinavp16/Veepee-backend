@@ -3,7 +3,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const accountDeletionController = require('../controllers/accountDeletionController');
 const { protect, authorize, buyerOrWholesaler } = require('../middlewares/auth');
-const { uploadAvatar, uploadProductImages } = require('../config/cloudinary');
+const { uploadAvatar, uploadProofImages } = require('../config/cloudinary');
 const validate = require('../middlewares/validate');
 const { createAuthLimiter, passwordResetRequestLimiter } = require('../middlewares/rateLimits');
 const { authValidation } = require('../validations');
@@ -32,7 +32,7 @@ router.get('/addresses', protect, authController.getAddresses);
 router.put('/addresses', protect, validate(authValidation.saveAddresses), authController.saveAddresses);
 router.post('/profile/avatar', protect, uploadAvatar.single('avatar'), authController.uploadProfileAvatar);
 router.post('/fcm-token', protect, buyerOrWholesaler, validate(authValidation.fcmToken), authController.registerFcmToken);
-router.post('/convert-to-wholesaler', protect, buyerOrWholesaler, uploadProductImages.array('proofImages', 3), validate(authValidation.convertWholesaler), authController.convertToWholesaler);
+router.post('/convert-to-wholesaler', protect, buyerOrWholesaler, uploadProofImages, validate(authValidation.convertWholesaler), authController.convertToWholesaler);
 
 // Account deletion: customers only (admin and staff accounts are not self-service).
 const customerOnly = authorize('buyer', 'wholesaler');

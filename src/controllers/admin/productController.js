@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { Product, StockLog, WebsiteSettings, Category, ProductAlert } = require('../../models');
-const { NotFoundError, BadRequestError } = require('../../utils/errors');
+const { NotFoundError, BadRequestError, ConflictError } = require('../../utils/errors');
 const { paginate, formatPaginationResponse, generateSKU } = require('../../utils/helpers');
 const { deleteImage } = require('../../config/cloudinary');
 const { getStorage } = require('../../config/firebase');
@@ -480,14 +480,14 @@ exports.restoreProduct = async (req, res, next) => {
 
 exports.updateStock = async (req, res, next) => {
   try {
-    const { stock, adjustment, reason } = req.body;
+    const { stock, adjustment, reason, expectedStock } = req.body;
 
     const product = await Product.findById(req.params.id);
     if (!product) {
       throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
-    const previousStock = product.stock;
+    let previousStock = product.stock;
     let newStock;
     let action;
     let quantityChange;
@@ -525,8 +525,28 @@ exports.updateStock = async (req, res, next) => {
       throw new BadRequestError('Resulting stock must be a safe non-negative integer', 'INVALID_STOCK_VALUE');
     }
 
-    // Atomic update with guard for adjustments
-    if (action === 'manual_adjust' && quantityChange < 0) {
+    // Set from the number the admin started from: only if stock is still
+    // that number (an order may have changed it meanwhile), in one step.
+    if (action === 'manual_set' && expectedStock !== undefined) {
+      const result = await Product.findOneAndUpdate(
+        { _id: req.params.id, stock: expectedStock },
+        { $set: { stock: newStock } },
+        { new: true }
+      );
+      if (!result) {
+        const current = await Product.findById(req.params.id).select('stock').lean();
+        const error = new ConflictError(
+          `Stock changed while you were editing: it is now ${current?.stock ?? 'unknown'}. Nothing was saved.`,
+          'STOCK_CHANGED'
+        );
+        error.details = { currentStock: current?.stock ?? null };
+        throw error;
+      }
+      previousStock = expectedStock;
+      quantityChange = newStock - expectedStock;
+      newStock = result.stock;
+    } else if (action === 'manual_adjust' && quantityChange < 0) {
+      // Atomic update with guard for adjustments
       const result = await Product.findOneAndUpdate(
         { _id: req.params.id, stock: { $gte: Math.abs(quantityChange) } },
         { $inc: { stock: quantityChange } },
@@ -569,6 +589,33 @@ exports.updateStock = async (req, res, next) => {
         change: quantityChange,
         reason,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Current stock for the products on screen (Price Management refreshes it
+ * every few seconds): `?ids=a,b,c`, up to 100.
+ */
+exports.getStockSnapshot = async (req, res, next) => {
+  try {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^[a-f0-9]{24}$/i.test(id));
+    const unique = [...new Set(ids)].slice(0, 100);
+    const products = unique.length
+      ? await Product.find({ _id: { $in: unique } }).select('stock lowStockThreshold').lean()
+      : [];
+    res.json({
+      success: true,
+      data: products.map((p) => ({
+        _id: p._id,
+        stock: p.stock,
+        lowStockThreshold: p.lowStockThreshold,
+      })),
     });
   } catch (error) {
     next(error);

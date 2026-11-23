@@ -80,7 +80,18 @@ const userSchema = new mongoose.Schema({
     gstNumber: { type: String, default: null },
     businessAddress: { type: String, default: null },
     contactPerson: { type: String, default: null },
-    status: { 
+    // The business's contact number from the application (10 digits). Not
+    // the account's sign-in phone, which applying never changes.
+    contactPhone: { type: String, default: null },
+    // When they last applied (or applied again) for a wholesaler account.
+    appliedAt: { type: Date, default: null },
+    // Who accepted or rejected the application, and when (admin only).
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: {
+      id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      name: { type: String, default: null },
+    },
+    status: {
       type: String, 
       // removed: admin switched a wholesaler back to a customer.
       enum: ['none', 'pending', 'accepted', 'rejected', 'removed'], 
@@ -88,12 +99,35 @@ const userSchema = new mongoose.Schema({
     },
     verified: { type: Boolean, default: false },
     verifiedAt: { type: Date, default: null },
+    // Private proof photos (see services/proofStorage.js); admins see them
+    // through short-lived signed links.
     proofImages: [{ type: String }],
     // Set when admin switches a wholesaler back to a customer. The reason
     // reaches the customer only when removalReasonShared is true.
     removedAt: { type: Date, default: null },
     removalReason: { type: String, default: null },
     removalReasonShared: { type: Boolean, default: false },
+    // Earlier decisions, kept when they apply again (newest last, at most
+    // 10; admin only, see sanitizeUser). The proof photos of an earlier
+    // application are deleted when the new one is sent.
+    previousApplications: {
+      type: [{
+        _id: false,
+        status: { type: String, enum: ['accepted', 'rejected', 'removed'] },
+        businessName: { type: String, default: null },
+        gstNumber: { type: String, default: null },
+        appliedAt: { type: Date, default: null },
+        reviewedAt: { type: Date, default: null },
+        reviewedBy: {
+          id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+          name: { type: String, default: null },
+        },
+        removedAt: { type: Date, default: null },
+        removalReason: { type: String, default: null },
+        removalReasonShared: { type: Boolean, default: false },
+      }],
+      default: undefined,
+    },
   },
 
   // Every admin switch between customer and wholesaler (admin only).

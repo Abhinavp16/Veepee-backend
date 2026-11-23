@@ -8,6 +8,8 @@ const { USER_ROLES, AUTH_PROVIDERS } = require('../utils/constants');
 const { sanitizeUser } = require('../utils/helpers');
 const { requireAcceptance, buildAcceptanceFields } = require('../config/legalAcceptance');
 const { notifyTeam } = require('../services/adminNotificationService');
+// Used through the module so tests can stand in for storage.
+const proofStorage = require('../services/proofStorage');
 const { recordRequest } = require('../services/passwordResetRequestService');
 
 const { ACCESS_SECONDS, REFRESH_SECONDS, DASHBOARD_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
@@ -88,6 +90,11 @@ exports.register = async (req, res, next) => {
   }
 };
 
+// Old app versions still offer "sign up as a wholesaler". Those sign-ups now
+// make a normal customer account (business name kept for when they apply);
+// wholesale access only comes through an application with proof photos.
+const APPLY_FROM_PROFILE_MESSAGE = 'Your account is ready. To get wholesale prices, apply for a wholesaler account from Profile.';
+
 exports.registerWholesaler = async (req, res, next) => {
   try {
     const { name, email, password, phone, businessName, gstNumber, marketingConsent } = req.body;
@@ -103,10 +110,11 @@ exports.registerWholesaler = async (req, res, next) => {
       phone,
       passwordHash: password,
       authProvider: AUTH_PROVIDERS.EMAIL,
-      role: USER_ROLES.WHOLESALER,
+      role: USER_ROLES.BUYER,
       businessInfo: {
         businessName,
-        gstNumber,
+        gstNumber: gstNumber || null,
+        status: 'none',
         verified: false,
       },
       marketingConsent,
@@ -117,7 +125,7 @@ exports.registerWholesaler = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Wholesaler registration successful.',
+      message: APPLY_FROM_PROFILE_MESSAGE,
       data: {
         user: sanitizeUser(user),
         ...tokens,
@@ -421,9 +429,11 @@ exports.registerWholesalerWithPhone = async (req, res, next) => {
       phone,
       passwordHash: password,
       authProvider: AUTH_PROVIDERS.EMAIL,
-      role: USER_ROLES.WHOLESALER,
+      // A customer account (see APPLY_FROM_PROFILE_MESSAGE).
+      role: USER_ROLES.BUYER,
       businessInfo: {
         businessName: businessName || null,
+        status: 'none',
         verified: false,
       },
       ...buildAcceptanceFields(req.body),
@@ -433,7 +443,7 @@ exports.registerWholesalerWithPhone = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Wholesaler registration successful',
+      message: APPLY_FROM_PROFILE_MESSAGE,
       data: {
         user: sanitizeUser(user),
         ...tokens,
@@ -733,52 +743,82 @@ exports.registerFcmToken = async (req, res, next) => {
 
 exports.convertToWholesaler = async (req, res, next) => {
   try {
+    // Field names are the ones every app version sends. contactPerson and
+    // phone are the business's contact details only: the account's own name
+    // and sign-in phone never change here.
     const { businessName, gstNumber, businessAddress, contactPerson, phone } = req.body;
     const user = req.user;
 
-    let proofImageUrls = [];
-    if (req.files && req.files.length > 0) {
-      const bucket = getStorage();
-      if (bucket) {
-        proofImageUrls = await Promise.all(
-          req.files.map(async (file) => {
-            const webpBuffer = await toStoredWebp(file.buffer);
-            const filename = `proofs/${user._id}/${uuidv4()}.webp`;
-            const fileUpload = bucket.file(filename);
-
-            await new Promise((resolve, reject) => {
-              const blobStream = fileUpload.createWriteStream({
-                metadata: { contentType: 'image/webp' },
-              });
-              blobStream.on('error', reject);
-              blobStream.on('finish', resolve);
-              blobStream.end(webpBuffer);
-            });
-
-            await fileUpload.makePublic();
-            return `https://storage.googleapis.com/${bucket.name}/${filename}`;
-          })
-        );
-      }
+    if (user.role === USER_ROLES.WHOLESALER) {
+      throw new BadRequestError('Your account already has wholesale prices.', 'ALREADY_WHOLESALER');
     }
 
-    // Update user business info (Admin verifies before role update)
-    user.businessInfo = {
-      ...user.businessInfo,
-      businessName,
-      gstNumber,
-      businessAddress, // We might need to add this to the model
-      contactPerson,
-      status: 'pending',
-      verified: false,
-      proofImages: proofImageUrls.length > 0 ? proofImageUrls : (user.businessInfo?.proofImages || []),
-    };
+    // 1 to 3 photos (the route accepts at most 3), every time: applying
+    // again needs new photos, the old ones are not reused.
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      throw new BadRequestError(
+        'Add at least one proof photo of your business (shop photo, GST certificate or trade licence).',
+        'PROOF_REQUIRED'
+      );
+    }
+    // All or nothing: if one photo fails, the ones already saved are deleted.
+    const uploads = await Promise.allSettled(files.map((file) => proofStorage.uploadProof(user._id, file.buffer)));
+    const proofImageUrls = uploads.filter((u) => u.status === 'fulfilled').map((u) => u.value);
+    const failed = uploads.find((u) => u.status === 'rejected');
+    if (failed) {
+      await proofStorage.deleteProofs(proofImageUrls);
+      throw failed.reason;
+    }
 
-    // Also update phone/name if changed? Usually contact person is just name
-    user.name = contactPerson || user.name;
-    user.phone = phone || user.phone;
+    // Admin verifies before the account becomes a wholesaler.
+    if (!user.businessInfo) user.businessInfo = {};
+    const info = user.businessInfo;
+    const oldProofs = [...(info.proofImages || [])];
 
-    await user.save();
+    // Applying again: the earlier decision is kept for admin, and its
+    // removal details no longer describe the account.
+    if (['accepted', 'rejected', 'removed'].includes(info.status)) {
+      const history = [...(info.previousApplications || [])];
+      history.push({
+        status: info.status,
+        businessName: info.businessName || null,
+        gstNumber: info.gstNumber || null,
+        appliedAt: info.appliedAt || null,
+        reviewedAt: info.reviewedAt || null,
+        reviewedBy: { id: info.reviewedBy?.id || null, name: info.reviewedBy?.name || null },
+        removedAt: info.removedAt || null,
+        removalReason: info.removalReason || null,
+        removalReasonShared: Boolean(info.removalReasonShared),
+      });
+      info.previousApplications = history.slice(-10);
+    }
+    info.removedAt = null;
+    info.removalReason = null;
+    info.removalReasonShared = false;
+
+    info.businessName = businessName;
+    info.gstNumber = gstNumber || null;
+    info.businessAddress = businessAddress;
+    info.contactPerson = contactPerson;
+    info.contactPhone = phone;
+    info.status = 'pending';
+    info.verified = false;
+    info.proofImages = proofImageUrls;
+    info.appliedAt = new Date();
+    // A new application waits for a new decision.
+    info.reviewedAt = null;
+    info.reviewedBy = { id: null, name: null };
+
+    try {
+      await user.save();
+    } catch (error) {
+      await proofStorage.deleteProofs(proofImageUrls);
+      throw error;
+    }
+    // The earlier application's photos are no longer needed.
+    proofStorage.deleteProofs(oldProofs.filter((url) => !proofImageUrls.includes(url)))
+      .catch((error) => console.error('Old proof cleanup failed:', error.message));
 
     notifyTeam({
       type: 'upgrade_request',
@@ -791,7 +831,7 @@ exports.convertToWholesaler = async (req, res, next) => {
 
     res.json({
       success: true,
-      message: 'Account converted to wholesaler successfully. Please wait for verification.',
+      message: 'Application sent. We will check your details and let you know.',
       data: sanitizeUser(user),
     });
   } catch (error) {

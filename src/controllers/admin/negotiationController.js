@@ -63,7 +63,8 @@ exports.getNegotiations = async (req, res, next) => {
 exports.getNegotiationById = async (req, res, next) => {
   try {
     const negotiation = await Negotiation.findById(req.params.id)
-      .populate('wholesalerId', 'name email phone businessInfo');
+      // Business details without the private proof photos.
+      .populate('wholesalerId', 'name email phone businessInfo.businessName businessInfo.gstNumber businessInfo.businessAddress businessInfo.contactPerson businessInfo.contactPhone businessInfo.status businessInfo.verified');
 
     if (!negotiation) {
       throw new NotFoundError('Negotiation not found', 'NEGOTIATION_NOT_FOUND');

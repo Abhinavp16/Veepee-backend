@@ -45,6 +45,7 @@ router.patch('/staff/:id', administrator, validate(adminValidation.updateStaff),
 // Price management changes commercial terms and remains Administrator-only.
 // The static snapshot route must precede /products/:id so it is never parsed as an id.
 router.get('/products/price-snapshot.xlsx', administrator, priceManagementController.exportPriceSnapshot);
+router.get('/products/stock-snapshot', administrator, adminProductController.getStockSnapshot);
 router.put('/products/:id/price-change', administrator, validate(adminValidation.priceChange), priceManagementController.createPriceChange);
 router.get('/price-changes', administrator, validate(adminValidation.priceChangeList, 'query'), priceManagementController.listPriceChanges);
 router.post('/price-changes/:id/cancel', administrator, priceManagementController.cancelPriceChange);
@@ -115,6 +116,8 @@ router.put('/payments/:id/reject', administrator, validate(adminValidation.rejec
 
 // Staff may only read customer records; account changes and notifications are Administrator-only.
 router.get('/customers', operationsStaff, adminCustomerController.getCustomers);
+// Account Upgrades (a path of its own, so it never meets /customers/:id).
+router.get('/wholesaler-applications', administrator, validate(adminValidation.wholesalerApplications, 'query'), adminCustomerController.getWholesalerApplications);
 // Before /customers/:id, so "notifications" is never read as an id.
 router.get('/customers/notifications/history', administrator, validate(adminValidation.notificationHistory, 'query'), adminCustomerController.notificationHistory);
 router.get('/customers/:id', operationsStaff, adminCustomerController.getCustomerById);

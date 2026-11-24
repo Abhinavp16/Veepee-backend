@@ -38,6 +38,13 @@ const refreshTokenSchema = new mongoose.Schema({
     ref: 'RefreshToken',
     default: null,
   },
+  // Cancelled by a lost-reply recovery (its predecessor came back while it
+  // was unused). If it is ever presented, a copy of the session exists, and
+  // all of the account's sessions are ended.
+  cancelledAt: {
+    type: Date,
+    default: null,
+  },
 }, {
   timestamps: true,
 });

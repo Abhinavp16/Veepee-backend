@@ -12,11 +12,19 @@ const { notifyTeam } = require('../services/adminNotificationService');
 const proofStorage = require('../services/proofStorage');
 const { recordRequest } = require('../services/passwordResetRequestService');
 const logger = require('../utils/logger');
+const mongoose = require('mongoose');
+
+// Ends every session of an account (all its renewal tokens), as a password
+// reset does.
+const revokeAllSessions = (userId) =>
+  RefreshToken.updateMany({ userId, isRevoked: false }, { $set: { isRevoked: true } });
 
 const { ACCESS_SECONDS, REFRESH_SECONDS, DASHBOARD_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
 
 // `sessionEndsAt` (a Date) hard-limits the session, as it does for staff.
-const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {}) => {
+// `recordId` sets the stored record's id (a renewal picks it first, to link
+// the old token to it in one step).
+const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null, recordId = null } = {}) => {
   const sx = sessionEndsAt ? Math.floor(sessionEndsAt.getTime() / 1000) : null;
   const accessExp = tokenExpiry(ACCESS_SECONDS(), sx);
   const refreshExp = tokenExpiry(REFRESH_SECONDS(), sx);
@@ -32,6 +40,7 @@ const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {})
   );
 
   const record = await RefreshToken.create({
+    ...(recordId && { _id: recordId }),
     userId,
     token: refreshToken,
     deviceInfo,
@@ -533,36 +542,58 @@ exports.refreshToken = async (req, res, next) => {
     }
 
     const now = new Date();
-    let claimed;
+    // The new token's record id is chosen first, so "this token was replaced
+    // by that one" is written in the same step that claims the token: there
+    // is never a moment where a swapped token points nowhere.
+    const nextId = new mongoose.Types.ObjectId();
+    let claimed = null;
     if (!storedToken.isRevoked) {
       // The normal case: swap this token, once (two requests at the same
       // moment can't both use it).
       claimed = await RefreshToken.findOneAndUpdate(
         { _id: storedToken._id, isRevoked: false },
-        { $set: { isRevoked: true, usedAt: now } },
+        { $set: { isRevoked: true, usedAt: now, replacedBy: nextId } },
         { new: true }
       );
     }
     if (!claimed) {
-      // Already swapped. If the phone never received the new token (the
-      // reply was lost: weak network, app closed mid-request), the new one
-      // was never used: cancel it and issue a fresh pair instead of signing
-      // the person out. Once the new token has been used, the old one stays
-      // refused (a copied token is caught).
-      const fresh = await RefreshToken.findOne({ token: refreshToken, userId: decoded.userId }).select('replacedBy usedAt');
-      if (!fresh?.replacedBy || !fresh.usedAt) throw refuse('signed out or revoked');
-      const lost = await RefreshToken.findOneAndUpdate(
-        { _id: fresh.replacedBy, isRevoked: false, usedAt: null },
-        { $set: { isRevoked: true } },
+      const fresh = await RefreshToken.findById(storedToken._id).select('replacedBy usedAt cancelledAt');
+      // A token a lost-reply recovery cancelled is being used: someone else
+      // has a copy of the session. End all of this account's sessions.
+      if (fresh?.cancelledAt) {
+        await revokeAllSessions(user._id);
+        throw refuse('a cancelled token was used: all sessions ended');
+      }
+      // Signed out (or revoked) without ever being swapped.
+      if (!fresh?.usedAt || !fresh.replacedBy) throw refuse('signed out or revoked');
+      const replacement = await RefreshToken.findById(fresh.replacedBy).select('isRevoked usedAt');
+      if (replacement?.usedAt) {
+        // The phone got and used the new token, yet the old one came back: a
+        // copy. End all of this account's sessions.
+        await revokeAllSessions(user._id);
+        throw refuse('reused after its replacement was used: all sessions ended');
+      }
+      if (replacement?.isRevoked) throw refuse('its replacement was signed out or revoked');
+      // The reply never reached the phone (weak network, app closed
+      // mid-request): its replacement is unused (or was never even created).
+      // Swap again, cancel the unused one, and send a fresh pair instead of
+      // signing the person out.
+      claimed = await RefreshToken.findOneAndUpdate(
+        { _id: fresh._id, replacedBy: fresh.replacedBy },
+        { $set: { replacedBy: nextId } },
         { new: true }
       );
-      if (!lost) throw refuse('reused after its replacement was used');
+      if (!claimed) throw refuse('renewed at the same moment');
+      if (replacement) {
+        await RefreshToken.updateOne(
+          { _id: replacement._id, usedAt: null },
+          { $set: { isRevoked: true, cancelledAt: now } }
+        );
+      }
       logger.warn(`[Auth] Renewal reply was lost; issuing a new pair for user ${decoded.userId}`);
-      claimed = fresh;
     }
 
-    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt });
-    await RefreshToken.updateOne({ _id: claimed._id }, { $set: { replacedBy: tokens.recordId } });
+    const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt, recordId: nextId });
 
     res.json({
       success: true,
@@ -582,10 +613,21 @@ exports.logout = async (req, res, next) => {
     const { refreshToken, fcmToken } = req.body;
 
     if (refreshToken) {
-      await RefreshToken.updateOne(
+      // This token and every token it was swapped for since (the app may
+      // have renewed just before signing out, or lost a renewal reply):
+      // none of them may bring the session back.
+      let current = await RefreshToken.findOneAndUpdate(
         { token: refreshToken, userId: req.user._id },
-        { isRevoked: true }
+        { $set: { isRevoked: true } },
+        { new: true }
       );
+      for (let hops = 0; current?.replacedBy && hops < 50; hops += 1) {
+        current = await RefreshToken.findOneAndUpdate(
+          { _id: current.replacedBy, userId: req.user._id },
+          { $set: { isRevoked: true } },
+          { new: true }
+        );
+      }
     }
 
     // Stop pushes for this user on this device once they sign out.

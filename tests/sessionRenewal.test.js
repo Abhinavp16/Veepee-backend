@@ -81,15 +81,13 @@ async function run() {
     const third = res.json.data.refreshToken; // the phone never got this
     res = await renew(second);
     assert.strictEqual(res.status, 200, `lost reply recovered: ${JSON.stringify(res.json)}`);
-    const fourth = res.json.data.refreshToken;
-    res = await renew(third);
-    assert.strictEqual(res.status, 401, 'the token the phone never got is cancelled');
-    // Lost again: still recovered while the newest one is unused.
+    assert.ok(res.json.data.refreshToken !== third);
+    // Lost again: still recovered while the newest one is unused. (The
+    // phone never had `third` or `fourth`; presenting those cancelled ones
+    // would mean a copy, tested in step 9.)
     res = await renew(second);
     assert.strictEqual(res.status, 200, 'a second lost reply is recovered too');
     const fifth = res.json.data.refreshToken;
-    res = await renew(fourth);
-    assert.strictEqual(res.status, 401);
     console.log('ok - a lost reply does not sign the person out');
 
     // 4. Once the new token has been used, the old one is refused (a copy).
@@ -99,11 +97,12 @@ async function run() {
     res = await renew(second);
     assert.strictEqual(res.status, 401, 'an old token after its replacement was used is refused');
     res = await renew(sixth);
-    assert.strictEqual(res.status, 200, 'the latest still works');
-    const seventh = res.json.data.refreshToken;
+    assert.strictEqual(res.status, 401, 'and, being a copy, it ends every session');
     console.log('ok - a token copied and used later is refused');
 
     // 5. Signing out ends it for good, even for an earlier token.
+    res = await call('POST', '/auth/login-phone', { phone, password: 'Buyer@123' });
+    const seventh = res.json.data.refreshToken;
     const access = (await renew(seventh)).json.data;
     res = await call('POST', '/auth/logout', { refreshToken: access.refreshToken }, access.accessToken);
     assert.strictEqual(res.status, 200, JSON.stringify(res.json));
@@ -123,13 +122,57 @@ async function run() {
     assert.strictEqual((await renew(a)).status, 401, 'a lost-reply recovery cannot undo a revoke-all');
     console.log('ok - revoking all sessions still signs out');
 
-    // 7. Two renewals with the same token at the same moment: only one
-    //    succeeds as a normal renewal; the phone's single request is safe.
+    // 7. Two renewals with the same token at the same moment (the app killed
+    //    and reopened mid-request): neither signs the person out.
+    for (let i = 0; i < 10; i += 1) {
+      res = await call('POST', '/auth/login-phone', { phone, password: 'Buyer@123' });
+      const c = res.json.data.refreshToken;
+      const results = await Promise.all([renew(c), renew(c)]);
+      assert.deepStrictEqual(results.map((r) => r.status), [200, 200], `round ${i}: ${JSON.stringify(results.map((r) => r.json))}`);
+      // The phone keeps the last reply it saw; it works.
+      assert.strictEqual((await renew(results[1].json.data.refreshToken)).status, 200);
+    }
+    console.log('ok - simultaneous renewals never sign the person out');
+
+    // 8. Signing out after the app renewed just before (stale access token):
+    //    the phone sends its older renewal token, yet nothing it was swapped
+    //    for can bring the session back.
     res = await call('POST', '/auth/login-phone', { phone, password: 'Buyer@123' });
-    const c = res.json.data.refreshToken;
-    const results = await Promise.all([renew(c), renew(c)]);
-    assert.ok(results.some((r) => r.status === 200), 'at least one renewal works');
-    console.log('ok - simultaneous renewals do not crash');
+    const r1 = res.json.data.refreshToken;
+    res = await renew(r1);
+    const pair2 = res.json.data;
+    res = await call('POST', '/auth/logout', { refreshToken: r1 }, pair2.accessToken);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await renew(pair2.refreshToken)).status, 401, 'the newer token is signed out too');
+    assert.strictEqual((await renew(r1)).status, 401, 'and the older one cannot recover the session');
+    // A lost reply, then sign out with the old token: the unused one ends too.
+    res = await call('POST', '/auth/login-phone', { phone, password: 'Buyer@123' });
+    const s1 = res.json.data;
+    const s2 = (await renew(s1.refreshToken)).json.data; // reply "lost"
+    res = await call('POST', '/auth/logout', { refreshToken: s1.refreshToken }, s1.accessToken);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await renew(s2.refreshToken)).status, 401);
+    assert.strictEqual((await renew(s1.refreshToken)).status, 401);
+    console.log('ok - signing out ends every token of that sign-in');
+
+    // 9. A copy: someone with the old token renews while the real phone's new
+    //    token is unused. When the real phone then uses its (cancelled) token,
+    //    every session of the account ends, the copy's included.
+    res = await call('POST', '/auth/login-phone', { phone, password: 'Buyer@123' });
+    const t1 = res.json.data.refreshToken;
+    const t2 = (await renew(t1)).json.data.refreshToken; // the real phone has t2
+    const stolen = (await renew(t1)).json.data.refreshToken; // the copy
+    res = await renew(t2);
+    assert.strictEqual(res.status, 401, 'the cancelled token is refused');
+    assert.strictEqual((await renew(stolen)).status, 401, 'and the copy is signed out too');
+    // Using the old token after its replacement was used also ends everything.
+    res = await call('POST', '/auth/login-phone', { phone, password: 'Buyer@123' });
+    const u1 = res.json.data.refreshToken;
+    const u2 = (await renew(u1)).json.data.refreshToken;
+    const u3 = (await renew(u2)).json.data.refreshToken; // u2 used
+    assert.strictEqual((await renew(u1)).status, 401);
+    assert.strictEqual((await renew(u3)).status, 401, 'a reused old token ends every session');
+    console.log('ok - a copied token ends all sessions instead of taking one over');
 
     console.log('sessionRenewal.test.js: all checks passed');
   } finally {

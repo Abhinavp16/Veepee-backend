@@ -11,6 +11,7 @@ const { notifyTeam } = require('../services/adminNotificationService');
 // Used through the module so tests can stand in for storage.
 const proofStorage = require('../services/proofStorage');
 const { recordRequest } = require('../services/passwordResetRequestService');
+const logger = require('../utils/logger');
 
 const { ACCESS_SECONDS, REFRESH_SECONDS, DASHBOARD_SESSION_SECONDS, tokenExpiry } = require('../utils/sessionTokens');
 
@@ -30,7 +31,7 @@ const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {})
     process.env.JWT_SECRET
   );
 
-  await RefreshToken.create({
+  const record = await RefreshToken.create({
     userId,
     token: refreshToken,
     deviceInfo,
@@ -38,7 +39,10 @@ const generateTokens = async (userId, deviceInfo, { sessionEndsAt = null } = {})
     sessionExpiresAt: sessionEndsAt,
   });
 
-  return { accessToken, refreshToken, ...(sessionEndsAt && { sessionExpiresAt: sessionEndsAt.toISOString() }) };
+  const tokens = { accessToken, refreshToken, ...(sessionEndsAt && { sessionExpiresAt: sessionEndsAt.toISOString() }) };
+  // The stored record, for renewals to link old → new (never sent: not enumerable).
+  Object.defineProperty(tokens, 'recordId', { value: record._id, enumerable: false });
+  return tokens;
 };
 
 // Staff sign in only through the staff login, so their sessions are always
@@ -507,33 +511,58 @@ exports.refreshToken = async (req, res, next) => {
     }
 
     const [storedToken, user] = await Promise.all([
-      RefreshToken.findOne({
-        token: refreshToken,
-        userId: decoded.userId,
-        isRevoked: false,
-      }),
-      User.findOne({ _id: decoded.userId, isActive: true }).select('_id'),
+      RefreshToken.findOne({ token: refreshToken, userId: decoded.userId }),
+      User.findOne({ _id: decoded.userId, isActive: true }).select('_id role'),
     ]);
 
-    if (!storedToken || !user) {
-      throw new UnauthorizedError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
-    }
+    const refuse = (reason) => {
+      logger.warn(`[Auth] Renewal refused (${reason}) for user ${decoded.userId}`);
+      return new UnauthorizedError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
+    };
+    if (!storedToken) throw refuse('unknown token');
+    if (!user) throw refuse('account closed');
 
     // Admin and staff sessions end at a fixed time and cannot be renewed past
     // it. One with no recorded end predates that rule, so it ends now.
     const sessionEndsAt = storedToken.sessionExpiresAt;
-    const account = await User.findById(user._id).select('role');
-    if (isDashboardRole(account?.role) && !sessionEndsAt) {
+    if (isDashboardRole(user.role) && !sessionEndsAt) {
       throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
     }
     if (sessionEndsAt && sessionEndsAt <= new Date()) {
       throw new UnauthorizedError('Session expired, please sign in again', 'SESSION_EXPIRED');
     }
 
-    storedToken.isRevoked = true;
-    await storedToken.save();
+    const now = new Date();
+    let claimed;
+    if (!storedToken.isRevoked) {
+      // The normal case: swap this token, once (two requests at the same
+      // moment can't both use it).
+      claimed = await RefreshToken.findOneAndUpdate(
+        { _id: storedToken._id, isRevoked: false },
+        { $set: { isRevoked: true, usedAt: now } },
+        { new: true }
+      );
+    }
+    if (!claimed) {
+      // Already swapped. If the phone never received the new token (the
+      // reply was lost: weak network, app closed mid-request), the new one
+      // was never used: cancel it and issue a fresh pair instead of signing
+      // the person out. Once the new token has been used, the old one stays
+      // refused (a copied token is caught).
+      const fresh = await RefreshToken.findOne({ token: refreshToken, userId: decoded.userId }).select('replacedBy usedAt');
+      if (!fresh?.replacedBy || !fresh.usedAt) throw refuse('signed out or revoked');
+      const lost = await RefreshToken.findOneAndUpdate(
+        { _id: fresh.replacedBy, isRevoked: false, usedAt: null },
+        { $set: { isRevoked: true } },
+        { new: true }
+      );
+      if (!lost) throw refuse('reused after its replacement was used');
+      logger.warn(`[Auth] Renewal reply was lost; issuing a new pair for user ${decoded.userId}`);
+      claimed = fresh;
+    }
 
     const tokens = await generateTokens(user._id, req.headers['user-agent'], { sessionEndsAt });
+    await RefreshToken.updateOne({ _id: claimed._id }, { $set: { replacedBy: tokens.recordId } });
 
     res.json({
       success: true,

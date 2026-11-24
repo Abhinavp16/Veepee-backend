@@ -7,7 +7,9 @@ const toSeconds = (value, fallback) => {
 };
 
 const ACCESS_SECONDS = () => toSeconds(process.env.JWT_ACCESS_EXPIRY, 15 * 60);
-const REFRESH_SECONDS = () => toSeconds(process.env.JWT_REFRESH_EXPIRY, 7 * 86400);
+// Customers and wholesalers stay signed in while they use the app; 60 days
+// without opening it signs them out. Each renewal starts the 60 days again.
+const REFRESH_SECONDS = () => toSeconds(process.env.JWT_REFRESH_EXPIRY, 60 * 86400);
 
 // Admins and staff sign in for a fixed working session: it can be refreshed,
 // but never past 5 hours after the original sign-in. DASHBOARD_SESSION_LENGTH

@@ -25,6 +25,19 @@ const refreshTokenSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Renewal: when this token was swapped for a new one, and which. If the
+  // phone never got the new one (the reply was lost), this token is
+  // presented again while its replacement is still unused; that is accepted
+  // once instead of signing the person out (see authController.refreshToken).
+  usedAt: {
+    type: Date,
+    default: null,
+  },
+  replacedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'RefreshToken',
+    default: null,
+  },
 }, {
   timestamps: true,
 });

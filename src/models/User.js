@@ -194,6 +194,10 @@ const userSchema = new mongoose.Schema({
   // member has already seen, so the highlights clear on every device.
   seenFeatures: { type: [String], default: [] },
 
+  // Admin panel Leads: when this administrator last opened the Leads page.
+  // The menu shows how many new leads came in after it.
+  leadsSeenAt: { type: Date, default: null },
+
   // Products saved in the app's wishlist (up to 500), newest last. Kept on
   // the account so it follows them to any phone; read it from
   // GET /wishlist. Admin can notify everyone who saved a product.

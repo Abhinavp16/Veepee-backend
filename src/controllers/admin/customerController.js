@@ -459,3 +459,29 @@ exports.notificationHistory = async (req, res, next) => {
     next(error);
   }
 };
+// Download links for a customer's wholesaler proof photos (administrators):
+// "sharma-traders-9812345671-proof-1.webp" and so on.
+exports.downloadProofs = async (req, res, next) => {
+  try {
+    const { downloadLinks, fileSlug } = require('../../services/fileDownloads');
+    const { PROOF_PREFIX } = require('../../services/proofStorage');
+    const customer = await User.findOne({ _id: req.params.id, ...customerQuery })
+      .select('name phone businessInfo.businessName businessInfo.proofImages')
+      .lean();
+    if (!customer) {
+      throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+    }
+    const proofs = customer.businessInfo?.proofImages || [];
+    const phone = String(customer.phone || '').replace(/\D/g, '').slice(-15);
+    const who = [fileSlug(customer.businessInfo?.businessName || customer.name, 'customer'), phone]
+      .filter(Boolean)
+      .join('-');
+    const data = await downloadLinks(
+      proofs.map((url, index) => ({ url, name: `${who}-proof-${index + 1}` })),
+      PROOF_PREFIX
+    );
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

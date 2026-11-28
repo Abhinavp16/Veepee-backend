@@ -45,5 +45,7 @@ analyticsSchema.index({ productId: 1, eventType: 1, timestamp: -1 });
 analyticsSchema.index({ timestamp: 1 }, { expireAfterSeconds: 7776000 });
 analyticsSchema.index({ eventType: 1, timestamp: -1 });
 analyticsSchema.index({ userId: 1, timestamp: -1 }, { sparse: true });
+// Leads: did this person add this product to the cart (or buy it) after viewing?
+analyticsSchema.index({ userId: 1, productId: 1, timestamp: -1 });
 
 module.exports = mongoose.model('Analytics', analyticsSchema);

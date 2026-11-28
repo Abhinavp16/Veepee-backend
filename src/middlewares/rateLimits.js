@@ -127,7 +127,17 @@ const publicFormLimiter = rateLimit({
   keyGenerator: (req) => `form:${clientIp(req)}`,
 });
 
+// A phone that isn't signed in joining the notification list (the app sends
+// it once per start). Generous: many phones share one mobile-network address.
+const guestDeviceLimiter = rateLimit({
+  ...common,
+  windowMs: 15 * 60 * 1000,
+  max: numberFrom(process.env.GUEST_DEVICE_RATE_LIMIT_MAX, 60),
+  keyGenerator: (req) => `guest-device:${clientIp(req)}`,
+});
+
 module.exports = {
+  guestDeviceLimiter,
   clientIp,
   verifiedUserId,
   createApiLimiter,

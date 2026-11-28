@@ -1,5 +1,5 @@
 const { getMessaging } = require('../config/firebase');
-const { Cart, DeviceToken, Notification, User } = require('../models');
+const { Cart, DeviceToken, GuestDevice, Notification, User } = require('../models');
 const { renderTemplate, normalizeLanguage } = require('../utils/notificationTemplates');
 
 function normalizeFcmData(data = {}) {
@@ -15,6 +15,13 @@ const FCM_BATCH_SIZE = 500;
 const DEAD_TOKEN_CODES = new Set([
   'messaging/registration-token-not-registered',
   'messaging/invalid-registration-token',
+]);
+// Errors meaning the token was never a real one for this app (made up, or
+// from another Firebase project). Only phones that aren't signed in are
+// removed for these: anyone can add one through the public guest-token route.
+const BAD_GUEST_TOKEN_CODES = new Set([
+  'messaging/invalid-argument',
+  'messaging/mismatched-credential',
 ]);
 
 class NotificationService {
@@ -125,6 +132,7 @@ class NotificationService {
       let failureCount = 0;
       let batchErrors = 0;
       const deadTokens = [];
+      const badGuestTokens = [];
       for (let start = 0; start < fcmTokens.length; start += FCM_BATCH_SIZE) {
         const batch = fcmTokens.slice(start, start + FCM_BATCH_SIZE);
         let result;
@@ -142,12 +150,16 @@ class NotificationService {
         failureCount += result.failureCount;
         result.responses.forEach((resp, idx) => {
           // Only tokens Firebase says are gone; a temporary error keeps them.
+          // "Invalid argument" can also mean the message itself was refused:
+          // only trusted when others in the batch went through.
           if (!resp.success && DEAD_TOKEN_CODES.has(resp.error?.code)) deadTokens.push(batch[idx]);
+          else if (!resp.success && result.successCount > 0 && BAD_GUEST_TOKEN_CODES.has(resp.error?.code)) badGuestTokens.push(batch[idx]);
         });
       }
 
       console.log(`Notifications sent: ${successCount} success, ${failureCount} failure`);
       if (deadTokens.length > 0) await this.removeInvalidTokens(deadTokens);
+      if (badGuestTokens.length > 0) await this.removeBadGuestTokens(badGuestTokens);
 
       const response = { successCount, failureCount, batchErrors };
       return response;
@@ -204,6 +216,7 @@ class NotificationService {
     let failureCount = 0;
     let batchErrors = 0;
     const deadTokens = [];
+    const badGuestTokens = [];
     for (let start = 0; start < full.length; start += FCM_BATCH_SIZE) {
       const batch = full.slice(start, start + FCM_BATCH_SIZE);
       let result;
@@ -219,10 +232,13 @@ class NotificationService {
       failureCount += result.failureCount;
       result.responses.forEach((resp, idx) => {
         if (!resp.success && DEAD_TOKEN_CODES.has(resp.error?.code)) deadTokens.push(batch[idx].token);
+        // (see sendToMultipleDevices: only when others in the batch went through)
+        else if (!resp.success && result.successCount > 0 && BAD_GUEST_TOKEN_CODES.has(resp.error?.code)) badGuestTokens.push(batch[idx].token);
       });
     }
     console.log(`Personal notifications sent: ${successCount} success, ${failureCount} failure`);
     if (deadTokens.length > 0) await this.removeInvalidTokens(deadTokens);
+    if (badGuestTokens.length > 0) await this.removeBadGuestTokens(badGuestTokens);
     return { successCount, failureCount, batchErrors };
   }
 
@@ -331,12 +347,22 @@ class NotificationService {
     }
   }
 
+  async removeBadGuestTokens(tokens) {
+    try {
+      await GuestDevice.deleteMany({ fcmToken: { $in: tokens } });
+    } catch (error) {
+      console.error('Error removing bad not-signed-in tokens:', error);
+    }
+  }
+
   async removeInvalidTokens(tokens) {
     try {
       await DeviceToken.updateMany(
         { fcmToken: { $in: tokens } },
         { $set: { isActive: false } }
       );
+      // An uninstalled phone also leaves the not-signed-in list.
+      await GuestDevice.deleteMany({ fcmToken: { $in: tokens } });
     } catch (error) {
       console.error('Error removing invalid tokens:', error);
     }

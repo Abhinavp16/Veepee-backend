@@ -1,5 +1,27 @@
 const notificationService = require('../services/notificationService');
-const { DeviceToken, Notification } = require('../models');
+const { DeviceToken, GuestDevice, Notification } = require('../models');
+
+// POST /notifications/guest-token (no sign-in): a phone that isn't signed in
+// joins the list for "Not signed in" custom notifications. Sent by the app on
+// each start while signed out; it keeps the row fresh (lastSeenAt).
+exports.registerGuestToken = async (req, res, next) => {
+  try {
+    const { fcmToken, platform, language, appVersion } = req.body;
+    await GuestDevice.updateOne(
+      { fcmToken },
+      {
+        $set: { platform, language, appVersion, lastSeenAt: new Date() },
+        $setOnInsert: { fcmToken },
+      },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    // Two starts at once: the other one saved it.
+    if (error?.code === 11000) return res.json({ success: true });
+    next(error);
+  }
+};
 
 exports.registerFcmToken = async (req, res, next) => {
   try {
@@ -26,6 +48,8 @@ exports.registerFcmToken = async (req, res, next) => {
       { $set: { isActive: true, platform: platform || 'android' } },
       { upsert: true, new: true }
     );
+    // Signed in now: no longer on the not-signed-in list.
+    await GuestDevice.deleteOne({ fcmToken });
 
     res.json({
       success: true,

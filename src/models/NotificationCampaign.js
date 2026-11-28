@@ -9,8 +9,10 @@ const notificationCampaignSchema = new mongoose.Schema({
   body: { type: String, required: true },
   titleHi: { type: String, default: '' },
   bodyHi: { type: String, default: '' },
-  // selected | buyers | wholesalers | cart | saved
+  // selected | buyers | wholesalers | cart | saved | guests (phones not signed in)
   audience: { type: String, required: true },
+  // guests only: 7 or 30 (joined the list in the last N days), null for any time.
+  installedWithinDays: { type: Number, default: null },
   // cart / saved only: all | buyers | wholesalers
   segment: { type: String, default: null },
   // saved only: the product people saved.

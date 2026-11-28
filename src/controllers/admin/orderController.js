@@ -310,3 +310,34 @@ exports.shipOrder = async (req, res, next) => {
     next(error);
   }
 };
+
+// Download links for an order's payment screenshots: the current one and
+// any rejected before it ("order-OX123-payment.jpg",
+// "order-OX123-payment-rejected-1.jpg").
+exports.downloadPaymentScreenshots = async (req, res, next) => {
+  try {
+    const { downloadLinks } = require('../../services/fileDownloads');
+    const order = await Order.findById(req.params.id).select('orderNumber').lean();
+    if (!order) {
+      throw new NotFoundError('Order not found', 'ORDER_NOT_FOUND');
+    }
+    const payment = await Payment.findOne({ orderId: order._id })
+      .select('screenshotUrl previousAttempts status')
+      .lean();
+    const number = String(order.orderNumber || order._id).replace(/[^\w-]/g, '');
+    const base = `order-${number}-payment`;
+    const items = [];
+    (payment?.previousAttempts || []).forEach((attempt, index) => {
+      if (attempt.screenshotUrl) {
+        items.push({ url: attempt.screenshotUrl, name: `${base}-rejected-${index + 1}`, label: `rejected-${index + 1}` });
+      }
+    });
+    if (payment?.screenshotUrl) {
+      items.push({ url: payment.screenshotUrl, name: payment.status === 'rejected' ? `${base}-rejected-latest` : base, label: 'current' });
+    }
+    const data = await downloadLinks(items, 'payments/');
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

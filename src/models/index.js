@@ -28,11 +28,13 @@ const LeadContact = require('./LeadContact');
 const Sale = require('./Sale');
 const SaleClaim = require('./SaleClaim');
 const NotificationCampaign = require('./NotificationCampaign');
+const GuestDevice = require('./GuestDevice');
 
 module.exports = {
   Sale,
   SaleClaim,
   NotificationCampaign,
+  GuestDevice,
   LeadContact,
   User,
   Product,

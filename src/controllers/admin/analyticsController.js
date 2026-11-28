@@ -312,6 +312,149 @@ const interestName = (rank) => ({
 });
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Someone becomes a lead 5 minutes after viewing without adding to cart.
+const LEAD_WAIT_MS = 5 * 60 * 1000;
+// A lead is "new" (green dot, menu count) for 2 days after their latest view.
+const NEW_LEAD_MS = 2 * 24 * 60 * 60 * 1000;
+const newLeadsSince = () => new Date(Date.now() - NEW_LEAD_MS);
+// The Leads page's default period: a lead contacted within it is "Contacted".
+const CONTACTED_WITHIN_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * People who became leads (or came back to look again) in the last 2 days
+ * and aren't contacted, each with their latest view. Same rules as the Leads
+ * page: a lead 5 minutes after the latest view, no cart add or purchase
+ * since, a product that can be bought. Every administrator's menu asks every
+ * 2 minutes, so the list is kept for a minute (only "seen" differs per
+ * person); marking leads contacted clears it.
+ */
+const NEW_LEADS_CACHE_MS = Number.isFinite(Number(process.env.NEW_LEADS_CACHE_MS))
+  ? Number(process.env.NEW_LEADS_CACHE_MS)
+  : 60 * 1000;
+let newLeadsCache = null;
+const forgetNewLeads = () => { newLeadsCache = null; };
+
+async function newLeadPeople() {
+  const now = Date.now();
+  if (newLeadsCache && now - newLeadsCache.at < NEW_LEADS_CACHE_MS) return newLeadsCache.people;
+  const rows = await Analytics.aggregate([
+    {
+      $match: {
+        eventType: ANALYTICS_EVENTS.VIEW,
+        userId: { $ne: null },
+        timestamp: { $gte: new Date(now - NEW_LEAD_MS) },
+      },
+    },
+    { $group: { _id: { userId: '$userId', productId: '$productId' }, lastViewed: { $max: '$timestamp' } } },
+    // The latest view (as on the page): still deciding if under 5 minutes ago.
+    { $match: { lastViewed: { $lte: new Date(now - LEAD_WAIT_MS) } } },
+    // The cheap checks first: a product that can be bought, a real person.
+    {
+      $lookup: {
+        from: 'products',
+        localField: '_id.productId',
+        foreignField: '_id',
+        pipeline: [{ $match: { comingSoon: { $ne: true } } }, { $project: { _id: 1 } }],
+        as: 'product',
+      },
+    },
+    { $match: { 'product.0': { $exists: true } } },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id.userId',
+        foreignField: '_id',
+        pipeline: [{ $project: { _id: 1 } }],
+        as: 'user',
+      },
+    },
+    { $match: { 'user.0': { $exists: true } } },
+    {
+      $lookup: {
+        from: 'leadcontacts',
+        let: { uid: '$_id.userId', pid: '$_id.productId' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$userId', '$$uid'] },
+                  { $eq: ['$productId', '$$pid'] },
+                  { $gte: ['$lastContactAt', new Date(now - CONTACTED_WITHIN_MS)] },
+                ],
+              },
+            },
+          },
+          { $limit: 1 },
+        ],
+        as: 'contacts',
+      },
+    },
+    { $match: { contacts: { $size: 0 } } },
+    {
+      $lookup: {
+        from: 'analytics',
+        let: { uid: '$_id.userId', pid: '$_id.productId', viewTime: '$lastViewed' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$userId', '$$uid'] },
+                  { $eq: ['$productId', '$$pid'] },
+                  { $gte: ['$timestamp', '$$viewTime'] },
+                  { $in: ['$eventType', [ANALYTICS_EVENTS.CART_ADD, ANALYTICS_EVENTS.PURCHASE]] },
+                ],
+              },
+            },
+          },
+          { $limit: 1 },
+        ],
+        as: 'conversions',
+      },
+    },
+    { $match: { conversions: { $size: 0 } } },
+    { $group: { _id: '$_id.userId', lastViewed: { $max: '$lastViewed' } } },
+  ]).option({ maxTimeMS: 20000 });
+  const people = rows.map((row) => row.lastViewed.getTime());
+  newLeadsCache = { at: now, people };
+  return people;
+}
+
+/**
+ * How many new leads, and how many arrived after `seenAt` (this
+ * administrator's last visit to Leads). A lead arrives 5 minutes after the
+ * view, so a view just before the visit, not on the page yet, still counts.
+ */
+async function countNewLeads(seenAt) {
+  const people = await newLeadPeople();
+  const seen = seenAt ? new Date(seenAt).getTime() : 0;
+  return { people: people.length, unseen: people.filter((viewed) => viewed + LEAD_WAIT_MS > seen).length };
+}
+
+// GET /admin/analytics/potential-customers/new: new leads (last 2 days, not
+// contacted) and how many came in since this administrator last opened Leads.
+exports.getNewLeadsCount = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('leadsSeenAt').lean();
+    const { people, unseen } = await countNewLeads(user?.leadsSeenAt);
+    res.json({ success: true, data: { newLeads: people, unseen, seenAt: user?.leadsSeenAt || null } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /admin/analytics/potential-customers/seen: opened Leads now.
+exports.markLeadsSeen = async (req, res, next) => {
+  try {
+    const seenAt = new Date();
+    await User.updateOne({ _id: req.user._id }, { $set: { leadsSeenAt: seenAt } });
+    res.json({ success: true, data: { seenAt } });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getPotentialCustomers = async (req, res, next) => {
   try {
     const { period = '7d', page = 1, limit = 30 } = req.query;
@@ -365,8 +508,6 @@ exports.getPotentialCustomers = async (req, res, next) => {
     if (mongoose.Types.ObjectId.isValid(req.query.companyId)) productQuery.company = new mongoose.Types.ObjectId(req.query.companyId);
     const productIds = Object.keys(productQuery).length ? await Product.find(productQuery).distinct('_id') : null;
 
-    // Someone becomes a lead 5 minutes after viewing without adding to cart.
-    const LEAD_WAIT_MS = 5 * 60 * 1000;
     const latestLeadView = new Date(Date.now() - LEAD_WAIT_MS);
     const lastViewedMatch = {
       $lte: lastViewedTo && lastViewedTo < latestLeadView ? lastViewedTo : latestLeadView,
@@ -452,6 +593,9 @@ exports.getPotentialCustomers = async (req, res, next) => {
           contact: { $arrayElemAt: ['$contacts', 0] },
           isContacted: { $gt: [{ $size: '$contacts' }, 0] },
           interestRank: INTEREST_RANK,
+          // A new lead: viewed in the last 2 days (green dot on the page).
+          // (not contacted: the same stage sets isContacted, so it's worked out here)
+          isNew: { $and: [{ $gte: ['$lastViewed', newLeadsSince()] }, { $eq: [{ $size: '$contacts' }, 0] }] },
         },
       },
       // The person: search by name, phone or business, and customer type.
@@ -511,6 +655,7 @@ exports.getPotentialCustomers = async (req, res, next) => {
     ];
 
     const leadFields = {
+      isNew: 1,
       viewCount: 1,
       lastViewed: 1,
       watchSeconds: 1,
@@ -534,6 +679,7 @@ exports.getPotentialCustomers = async (req, res, next) => {
             viewCount: { $sum: '$viewCount' },
             watchSeconds: { $sum: '$watchSeconds' },
             lastViewed: { $max: '$lastViewed' },
+            isNew: { $max: '$isNew' },
             interestRank: { $max: '$interestRank' },
             contactedCount: { $sum: { $cond: ['$isContacted', 1, 0] } },
             lastContactAt: { $max: '$contact.lastContactAt' },
@@ -542,6 +688,7 @@ exports.getPotentialCustomers = async (req, res, next) => {
                 productId: '$_id.productId',
                 viewCount: '$viewCount',
                 lastViewed: '$lastViewed',
+                isNew: '$isNew',
                 watchSeconds: '$watchSeconds',
                 contact: '$contact',
                 isContacted: '$isContacted',
@@ -599,6 +746,7 @@ exports.getPotentialCustomers = async (req, res, next) => {
                   viewCount: 1,
                   watchSeconds: 1,
                   lastViewed: 1,
+                  isNew: 1,
                   contactedCount: 1,
                   lastContactAt: 1,
                   interest: interestName('$interestRank'),
@@ -696,6 +844,7 @@ exports.markLeadsContacted = async (req, res, next) => {
         upsert: true,
       },
     })));
+    forgetNewLeads();
     res.json({ success: true, message: `${leads.length} ${leads.length === 1 ? 'lead' : 'leads'} moved to Contacted`, data: { marked: leads.length } });
   } catch (error) {
     next(error);
@@ -710,6 +859,7 @@ exports.unmarkLeadContacted = async (req, res, next) => {
       throw new BadRequestError('Invalid lead', 'INVALID_LEAD');
     }
     await LeadContact.deleteOne({ userId, productId });
+    forgetNewLeads();
     res.json({ success: true, message: 'Moved back to To contact' });
   } catch (error) {
     next(error);

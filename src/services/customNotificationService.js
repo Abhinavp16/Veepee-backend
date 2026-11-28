@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 const {
-  User, Cart, DeviceToken, Notification, NotificationCampaign, Product, Category, Sale, Offer,
+  User, Cart, DeviceToken, GuestDevice, Notification, NotificationCampaign, Product, Category, Sale, Offer,
 } = require('../models');
 const notificationService = require('./notificationService');
 const { saleStatus } = require('./saleService');
 const { BadRequestError, ConflictError } = require('../utils/errors');
 const { USER_ROLES, PRODUCT_STATUS } = require('../utils/constants');
-const { PAGE_ROLES } = require('../utils/customNotificationDefaults');
+const { PAGE_ROLES, GUEST_PAGES, GUEST_ONLY_PAGES } = require('../utils/customNotificationDefaults');
 
 // Admin "Custom notification" (Customers page): who gets it, what tapping it
 // opens, an optional coupon, each person's name and language. Every
@@ -133,7 +133,8 @@ async function linkRole(link) {
  * null when it mixes both (or is a list of chosen people).
  */
 function audienceRole({ audience, segment }) {
-  if (audience === 'buyers') return USER_ROLES.BUYER;
+  // Phones that aren't signed in become customers when they sign up.
+  if (audience === 'buyers' || audience === 'guests') return USER_ROLES.BUYER;
   if (audience === 'wholesalers') return USER_ROLES.WHOLESALER;
   if (audience === 'cart' || audience === 'saved') {
     if (segment === 'buyers') return USER_ROLES.BUYER;
@@ -289,11 +290,75 @@ const noRecipientsError = (body) => new BadRequestError(
   'NO_RECIPIENTS'
 );
 
+// ---- Phones that aren't signed in ("guests") ------------------------------
+
+/**
+ * What a notification to phones that aren't signed in may open: pages that
+ * work without an account, a product, a category or a sale for customers.
+ * Create account ('signup') is for those phones only.
+ */
+function checkGuestLink(body) {
+  const link = body.link;
+  const isGuests = body.audience === 'guests';
+  if (link?.type !== 'page') return;
+  if (isGuests && !GUEST_PAGES.includes(link.page)) {
+    throw new BadRequestError(
+      'That page needs an account. For phones that aren\'t signed in, pick Create account, a product, a category, a sale, Hot deals, Popular, Coming soon or Coupons.',
+      'PAGE_NEEDS_ACCOUNT'
+    );
+  }
+  if (!isGuests && GUEST_ONLY_PAGES.includes(link.page)) {
+    throw new BadRequestError('Create account is only for phones that aren\'t signed in', 'PAGE_NOT_FOR_AUDIENCE');
+  }
+}
+
+/** The not-signed-in phones, optionally only those that joined lately. */
+function guestQuery({ installedWithinDays }) {
+  const query = {};
+  const days = Number(installedWithinDays);
+  if (days > 0) query.createdAt = { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
+  return query;
+}
+
+// A phone is left out when someone is signed in on it (an active account
+// token): the not-signed-in row may be older than the sign-in.
+const notSignedInStages = [
+  {
+    $lookup: {
+      from: DeviceToken.collection.name,
+      localField: 'fcmToken',
+      foreignField: 'fcmToken',
+      pipeline: [{ $match: { isActive: true } }, { $limit: 1 }, { $project: { _id: 1 } }],
+      as: 'signedIn',
+    },
+  },
+  { $match: { 'signedIn.0': { $exists: false } } },
+];
+
+async function countGuests(body) {
+  const [row] = await GuestDevice.aggregate([
+    { $match: guestQuery(body) },
+    ...notSignedInStages,
+    { $group: { _id: null, phones: { $sum: 1 }, hindi: { $sum: { $cond: [{ $eq: ['$language', 'hi'] }, 1, 0] } } } },
+  ]);
+  const phones = row?.phones || 0;
+  return { people: phones, phones, hindi: row?.hindi || 0, skipped: 0 };
+}
+
+async function guestRecipients(body) {
+  return GuestDevice.aggregate([
+    { $match: guestQuery(body) },
+    ...notSignedInStages,
+    { $project: { _id: 0, fcmToken: 1, language: 1 } },
+  ]);
+}
+
 /**
  * POST /admin/customers/notifications/count: people and phones it would
  * reach. Counted in the database (no list of people is loaded).
  */
 async function countRecipients(body) {
+  if (body.audience === 'guests') return countGuests(body);
   const query = await recipientQuery(body);
   // Only the chosen-people filter applies here; a group of the wrong kind is
   // refused when sending (the admin form doesn't offer it).
@@ -338,9 +403,16 @@ async function sendCustomNotification(body, sender) {
   }
   const { titleHi, bodyHi } = hindiTexts(body);
   const couponCode = String(body.couponCode || '').trim().toUpperCase();
+  checkGuestLink(body);
   const linkInfo = await notificationLink(body.link);
   const { data: linkData, image: linkedImage, summary } = linkInfo;
   const imageUrl = checkNotificationImage(body.imageUrl, linkedImage);
+
+  if (body.audience === 'guests') {
+    return sendToGuests(body, sender, {
+      sendId, title, text, titleHi, bodyHi, couponCode, linkInfo, imageUrl,
+    });
+  }
 
   let product = null;
   if (body.audience === 'saved') {
@@ -471,6 +543,102 @@ async function sendCustomNotification(body, sender) {
   return {
     message: `Saved for ${people} · ${pushText}.${skippedText}`,
     data: { saved: users.length, phones, delivered, failed, pushConfigured, skipped, campaignId: String(campaign._id) },
+  };
+}
+
+/**
+ * A custom notification to phones that aren't signed in: a push only (they
+ * have no in-app inbox), in each phone's language, with {name} as "there".
+ */
+async function sendToGuests(body, sender, {
+  sendId, title, text, titleHi, bodyHi, couponCode, linkInfo, imageUrl,
+}) {
+  applyRoleRule(linkInfo, body, []);
+  await checkCoupon(couponCode, body, []);
+  const devices = await guestRecipients(body);
+  if (devices.length === 0) {
+    throw new BadRequestError(
+      'No phone that isn\'t signed in can get notifications yet. Phones join once they have the new app version and allow notifications.',
+      'NO_RECIPIENTS'
+    );
+  }
+
+  let campaign;
+  try {
+    campaign = await NotificationCampaign.create({
+      title,
+      body: text,
+      titleHi,
+      bodyHi,
+      audience: 'guests',
+      installedWithinDays: Number(body.installedWithinDays) || null,
+      link: linkInfo.summary,
+      couponCode,
+      imageUrl,
+      sentBy: { id: sender?._id || null, name: sender?.name || '' },
+      recipients: devices.length,
+      sendId,
+      status: 'sending',
+    });
+  } catch (error) {
+    if (error?.code === 11000) throw new ConflictError(ALREADY_SENT, 'ALREADY_SENT');
+    throw error;
+  }
+
+  const texts = { title, body: text, titleHi, bodyHi, hasHindi: Boolean(titleHi), couponCode };
+  const data = {
+    ...linkInfo.data,
+    ...(couponCode && { couponCode }),
+    ...(imageUrl && { imageUrl }),
+  };
+  const english = messageFor({ preferredLanguage: 'en' }, texts);
+  const hindi = messageFor({ preferredLanguage: 'hi' }, texts);
+  const phones = devices.length;
+
+  let delivered = 0;
+  let failed = 0;
+  let pushError = '';
+  let pushConfigured = Boolean(notificationService.getMessagingInstance());
+  if (pushConfigured) {
+    try {
+      const result = texts.hasHindi
+        ? await notificationService.sendEachToDevices(devices.map((device) => ({
+          token: device.fcmToken,
+          notification: { ...(device.language === 'hi' ? hindi : english), ...(imageUrl && { imageUrl }) },
+          data,
+        })))
+        : await notificationService.sendToMultipleDevices(
+          devices.map((device) => device.fcmToken),
+          { ...english, ...(imageUrl && { imageUrl }) },
+          data
+        );
+      if (result === null) {
+        pushConfigured = false;
+      } else {
+        delivered = result.successCount || 0;
+        failed = result.failureCount || 0;
+        if (result.batchErrors) pushError = 'Firebase did not accept some of the pushes';
+      }
+    } catch (error) {
+      console.error('Custom notification push (not signed in) failed:', error.message);
+      failed = phones - delivered;
+      pushError = error.message || 'Push failed';
+    }
+  }
+
+  await NotificationCampaign.updateOne(
+    { _id: campaign._id },
+    { $set: { status: 'sent', phones, delivered, failed, pushConfigured, pushError } }
+  ).catch((error) => console.error('Could not update the notification history:', error.message));
+
+  const phoneWords = `${phones} ${phones === 1 ? 'phone' : 'phones'} that ${phones === 1 ? 'isn\'t' : 'aren\'t'} signed in`;
+  let message;
+  if (!pushConfigured) message = `Not sent to ${phoneWords}: Firebase is not set up on the server.`;
+  else if (pushError) message = `Delivered to ${delivered} of ${phoneWords}; the rest failed (${pushError}).`;
+  else message = `Delivered to ${delivered} of ${phoneWords}.`;
+  return {
+    message,
+    data: { saved: 0, phones, delivered, failed, pushConfigured, skipped: 0, campaignId: String(campaign._id) },
   };
 }
 

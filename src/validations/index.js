@@ -79,9 +79,16 @@ const notificationLink = Joi.object({
 // Who gets a custom notification. 'selected': the people in userIds; buyers /
 // wholesalers: every customer / wholesaler; cart: everyone with something in
 // their cart; saved: everyone who saved productId. cart and saved can be
-// narrowed to customers or wholesalers (segment).
+// narrowed to customers or wholesalers (segment). guests: phones with the app
+// that aren't signed in, optionally only those that joined in the last
+// installedWithinDays days.
 const notificationAudience = {
-  audience: Joi.string().valid('selected', 'buyers', 'wholesalers', 'cart', 'saved').default('selected'),
+  audience: Joi.string().valid('selected', 'buyers', 'wholesalers', 'cart', 'saved', 'guests').default('selected'),
+  installedWithinDays: Joi.when('audience', {
+    is: 'guests',
+    then: Joi.number().integer().valid(7, 30).allow(null).default(null),
+    otherwise: Joi.any().strip(),
+  }),
   userIds: Joi.when('audience', {
     is: 'selected',
     // More than this: send to a group instead.
@@ -936,7 +943,26 @@ const wishlistValidation = {
   }),
 };
 
+// A phone that isn't signed in joining the "Not signed in" notification list.
+// Firebase tokens are long strings of letters, digits and : _ - .
+const fcmTokenString = Joi.string().trim().min(20).max(400).pattern(/^[A-Za-z0-9:_.-]+$/);
+const notificationValidation = {
+  // A signed-in phone's push token: a plain string, never a query object.
+  deviceToken: Joi.object({
+    fcmToken: fcmTokenString.required(),
+    platform: Joi.string().valid('android', 'ios').default('android'),
+  }),
+  guestToken: Joi.object({
+    // Real ones are about 150-200 characters.
+    fcmToken: Joi.string().trim().min(20).max(400).pattern(/^[A-Za-z0-9:_.-]+$/).required(),
+    platform: Joi.string().valid('android', 'ios').default('android'),
+    language: Joi.string().valid('en', 'hi').default('en'),
+    appVersion: Joi.string().trim().max(32).pattern(/^[0-9A-Za-z.+-]*$/).allow('').default(''),
+  }),
+};
+
 module.exports = {
+  notificationValidation,
   authValidation,
   productValidation,
   cartValidation,

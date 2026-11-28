@@ -26,5 +26,7 @@ const deviceTokenSchema = new mongoose.Schema({
 // Compound index: one token per user+device combo
 deviceTokenSchema.index({ userId: 1, fcmToken: 1 }, { unique: true });
 deviceTokenSchema.index({ userId: 1, isActive: 1 });
+// Is this phone signed in? (leaving signed-in phones out of a not-signed-in send)
+deviceTokenSchema.index({ fcmToken: 1, isActive: 1 });
 
 module.exports = mongoose.model('DeviceToken', deviceTokenSchema);

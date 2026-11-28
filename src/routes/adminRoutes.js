@@ -105,6 +105,7 @@ router.put('/negotiations/:id/counter', operationsStaff, validate(adminValidatio
 router.get('/orders', operationsStaff, adminOrderController.getOrders);
 router.get('/orders/:id', operationsStaff, adminOrderController.getOrderById);
 router.get('/orders/:id/receipt', operationsStaff, adminOrderController.getOrderReceipt);
+router.get('/orders/:id/payment-screenshots/download', operationsStaff, adminOrderController.downloadPaymentScreenshots);
 router.put('/orders/:id/status', operationsStaff, validate(adminValidation.updateOrderStatus), adminOrderController.updateOrderStatus);
 router.put('/orders/:id/ship', operationsStaff, validate(adminValidation.shipOrder), adminOrderController.shipOrder);
 // New orders: add the delivery charge and confirm, or reject with a reason.
@@ -121,6 +122,8 @@ router.get('/wholesaler-applications', administrator, validate(adminValidation.w
 // Before /customers/:id, so "notifications" is never read as an id.
 router.get('/customers/notifications/history', administrator, validate(adminValidation.notificationHistory, 'query'), adminCustomerController.notificationHistory);
 router.get('/customers/:id', operationsStaff, adminCustomerController.getCustomerById);
+// Proof photos are for administrators only (as when viewing them).
+router.get('/customers/:id/proofs/download', administrator, adminCustomerController.downloadProofs);
 router.put('/customers/:id/upgrade', administrator, validate(adminValidation.upgradeCustomer), adminCustomerController.upgradeCustomer);
 router.put('/customers/:id/account-type', administrator, validate(adminValidation.updateCustomerAccountType), adminCustomerController.updateCustomerAccountType);
 router.post('/customers/:id/reset-password', administrator, adminCustomerController.resetCustomerPassword);
@@ -133,6 +136,8 @@ router.get('/analytics/dashboard', operationsStaff, adminAnalyticsController.get
 router.get('/analytics/products', administrator, adminAnalyticsController.getProductAnalytics);
 router.get('/analytics/sales', administrator, adminAnalyticsController.getSalesAnalytics);
 router.get('/analytics/demand', administrator, adminAnalyticsController.getDemandInsights);
+router.get('/analytics/potential-customers/new', administrator, adminAnalyticsController.getNewLeadsCount);
+router.post('/analytics/potential-customers/seen', administrator, adminAnalyticsController.markLeadsSeen);
 router.get('/analytics/potential-customers', administrator, adminAnalyticsController.getPotentialCustomers);
 router.post('/analytics/potential-customers/contacted', administrator, adminAnalyticsController.markLeadsContacted);
 router.delete('/analytics/potential-customers/contacted', administrator, adminAnalyticsController.unmarkLeadContacted);

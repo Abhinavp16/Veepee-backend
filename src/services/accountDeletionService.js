@@ -132,9 +132,15 @@ async function completeRequest({ requestId, adminUserId, staffNote = '', identit
   const completedAt = new Date();
 
   // Payment screenshots are removed from storage after the database is updated.
-  const screenshotPaths = (await Payment.find({ userId, screenshotPublicId: { $nin: [null, ''] } })
-    .select('screenshotPublicId')
-    .lean()).map((payment) => payment.screenshotPublicId);
+  // Rejected screenshots sent before the current one go too.
+  const screenshotPaths = (await Payment.find({ userId })
+    .select('screenshotPublicId previousAttempts.screenshotPublicId')
+    .lean())
+    .flatMap((payment) => [
+      payment.screenshotPublicId,
+      ...(payment.previousAttempts || []).map((attempt) => attempt.screenshotPublicId),
+    ])
+    .filter(Boolean);
 
   // Negotiations that produced an order stay (they hold no personal data, only the product and price).
   const linkedNegotiationIds = (await Order.find({ userId, negotiationId: { $ne: null } })
@@ -165,7 +171,19 @@ async function completeRequest({ requestId, adminUserId, staffNote = '', identit
         'shippingAddress.addressLine2': 1,
       },
     }),
-    Payment.updateMany({ userId }, { $set: { screenshotUrl: null, screenshotPublicId: null } }),
+    Payment.updateMany({ userId }, [{
+      $set: {
+        screenshotUrl: null,
+        screenshotPublicId: null,
+        previousAttempts: {
+          $map: {
+            input: { $ifNull: ['$previousAttempts', []] },
+            as: 'attempt',
+            in: { $mergeObjects: ['$$attempt', { screenshotUrl: null, screenshotPublicId: null }] },
+          },
+        },
+      },
+    }]),
   ]);
 
   user.name = 'Deleted account';

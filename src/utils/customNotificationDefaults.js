@@ -12,7 +12,14 @@ const NOTIFICATION_PAGES = [
   'coming-soon',
   'wholesaler',
   'negotiations',
+  'signup',
 ];
+
+// Pages that work without an account: the only ones a notification to
+// phones that aren't signed in ("guests") can open. 'signup' opens Create
+// account and is for those phones only.
+const GUEST_PAGES = ['coupons', 'hot-deals', 'popular', 'coming-soon', 'signup'];
+const GUEST_ONLY_PAGES = ['signup'];
 
 // Pages only one kind of account can use: "Apply for Wholesaler" is for
 // customers, "Ask your price" (negotiations) for wholesalers.
@@ -113,6 +120,8 @@ const DEFAULT_NOTIFICATION_TEMPLATES = [
 ];
 
 module.exports = {
+  GUEST_PAGES,
+  GUEST_ONLY_PAGES,
   NOTIFICATION_PAGES,
   PAGE_ROLES,
   MAX_NOTIFICATION_TEMPLATES,
